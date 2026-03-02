@@ -1,0 +1,14 @@
+#!/bin/bash
+#############################################
+# Cipi — Worker Helper (sudoers-restricted)
+#############################################
+set -euo pipefail
+ACTION="${1:-}"; APP="${2:-}"
+[[ -z "$ACTION" || -z "$APP" ]] && { echo "Usage: cipi-worker {restart|status} <app>"; exit 1; }
+CALLER=$(logname 2>/dev/null || whoami)
+[[ "$CALLER" != "root" && "$CALLER" != "$APP" ]] && { echo "Permission denied"; exit 1; }
+case "$ACTION" in
+    restart) supervisorctl restart "${APP}-worker-*" 2>/dev/null ;;
+    status)  supervisorctl status "${APP}-worker-*" 2>/dev/null ;;
+    *) echo "Use: restart|status"; exit 1 ;;
+esac

@@ -1,678 +1,547 @@
 #!/bin/bash
-
 #############################################
-# App Management Functions
+# Cipi — Application Management
 #############################################
 
-source "${CIPI_LIB_DIR}/nginx.sh"
-source "${CIPI_LIB_DIR}/php.sh"
+# ── CREATE ────────────────────────────────────────────────────
 
-# Create app
 app_create() {
-    local username=""
-    local repository=""
-    local branch="main"
-    local php_version="8.4"
-    local interactive=true
-    
-    # Parse arguments
-    for arg in "$@"; do
-        case $arg in
-            --user=*)
-                username="${arg#*=}"
-                ;;
-            --repository=*)
-                repository="${arg#*=}"
-                ;;
-            --branch=*)
-                branch="${arg#*=}"
-                ;;
-            --php=*)
-                php_version="${arg#*=}"
-                ;;
-        esac
-    done
-    
-    # If all parameters provided, non-interactive mode
-    if [ -n "$username" ] && [ -n "$repository" ] && [ -n "$php_version" ]; then
-        interactive=false
-    fi
-    
-    # Interactive prompts
-    if [ $interactive = true ]; then
-        echo -e "${BOLD}Create New App${NC}"
-        echo "─────────────────────────────────────"
-        echo ""
-        
-        if [ -z "$username" ]; then
-            default_username=$(generate_username)
-            read -p "Username [$default_username]: " username
-            username=${username:-$default_username}
-        fi
-        
-        if [ -z "$repository" ]; then
-            read -p "Git repository URL: " repository
-        fi
-        
-        if [ -z "$branch" ]; then
-            read -p "Git branch [main]: " branch
-            branch=${branch:-main}
-        fi
-        
-        if [ -z "$php_version" ]; then
-            echo ""
-            echo "Select PHP version:"
-            local php_versions=($(get_installed_php_versions))
-            local i=1
-            for version in "${php_versions[@]}"; do
-                echo "  $i. PHP $version"
-                ((i++))
-            done
-            read -p "Choice [1]: " php_choice
-            php_choice=${php_choice:-1}
-            php_version=${php_versions[$((php_choice-1))]}
-        fi
-    fi
-    
-    # Validate inputs
-    if [ -z "$username" ] || [ -z "$repository" ]; then
-        echo -e "${RED}Error: Username and repository are required${NC}"
-        exit 1
-    fi
-    
-    # Check if app already exists
-    if json_has_key "${VIRTUALHOSTS_FILE}" "$username"; then
-        echo -e "${RED}Error: App '$username' already exists${NC}"
-        exit 1
-    fi
-    
-    # Check if PHP version is installed
-    if ! is_php_installed "$php_version"; then
-        echo -e "${YELLOW}PHP $php_version is not installed. Installing...${NC}"
-        install_php_version "$php_version"
-    fi
-    
-    echo ""
-    echo -e "${CYAN}Creating virtual host...${NC}"
-    
-    # Generate password
-    local password=$(generate_password 24)
-    
-    # Create system user
-    echo "  → Creating system user..."
-    if ! create_system_user "$username" "$password"; then
-        echo -e "${RED}Error: Failed to create system user${NC}"
-        exit 1
-    fi
-    
-    # Create directory structure
-    echo "  → Creating directory structure..."
-    local home_dir="/home/$username"
-    mkdir -p "$home_dir"/{wwwroot,logs,.ssh}
-    chown -R "$username:$username" "$home_dir"
-    chmod 750 "$home_dir"  # Only owner and group can access
-    chmod 755 "$home_dir/logs"  # Logs readable by web server if needed
-    chmod 700 "$home_dir/.ssh"  # SSH keys only for owner
-    
-    # Generate SSH key pair for Git
-    echo "  → Generating SSH key pair for Git..."
-    sudo -u "$username" ssh-keygen -t rsa -b 4096 -C "${username}@cipi" -f "$home_dir/.ssh/id_rsa" -N "" >/dev/null 2>&1
-    cp "$home_dir/.ssh/id_rsa.pub" "$home_dir/gitkey.pub"
-    chown "$username:$username" "$home_dir/gitkey.pub"
-    chmod 644 "$home_dir/gitkey.pub"
-    
-    # Clone repository
-    echo "  → Cloning repository..."
-    sudo -u "$username" git clone -b "$branch" "$repository" "$home_dir/wwwroot" 2>/dev/null
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}Error: Failed to clone repository${NC}"
-        delete_system_user "$username"
-        rm -rf "$home_dir"
-        exit 1
-    fi
-    
-    # Create PHP-FPM pool
-    echo "  → Creating PHP-FPM pool..."
-    create_php_pool "$username" "$php_version"
-    
-    # Create Nginx configuration
-    echo "  → Creating Nginx configuration..."
-    create_nginx_config "$username" "" "$php_version"
-    
-    # Create deployment script
-    echo "  → Creating deployment script..."
-    create_deploy_script "$username" "$repository" "$branch"
-    
-    # Create SSL script
-    echo "  → Creating SSL script..."
-    create_ssl_script "$username"
-    
-    # Setup log rotation
-    echo "  → Setting up log rotation..."
-    setup_log_rotation "$username"
-    
-    # Setup Laravel (if detected)
-    if [ -f "$home_dir/wwwroot/artisan" ]; then
-        echo "  → Detected Laravel application, setting up..."
-        setup_laravel "$username"
-    fi
-    
-    # Setup crontab for user
-    echo "  → Setting up crontab..."
-    setup_user_crontab "$username"
-    
-    # Reload nginx
-    echo "  → Reloading Nginx..."
-    nginx_reload
-    
-    # Save to storage (password not saved for security)
-    local app_data=$(cat <<EOF
+    parse_args "$@"
+    local app_user="${ARG_user:-}" domain="${ARG_domain:-}" repository="${ARG_repository:-}"
+    local branch="${ARG_branch:-main}" php_ver="${ARG_php:-8.4}"
+
+    # Interactive prompts for missing fields
+    [[ -z "$app_user" ]]    && read_input "App username (lowercase, min 3 chars)" "" app_user
+    [[ -z "$domain" ]]      && read_input "Primary domain" "" domain
+    [[ -z "$repository" ]]  && read_input "Git repository URL (SSH)" "" repository
+    read_input "Branch" "$branch" branch
+    read_input "PHP version" "$php_ver" php_ver
+
+    # Validate
+    validate_username "$app_user"  || { error "Invalid username '${app_user}'"; exit 1; }
+    validate_domain "$domain"      || { error "Invalid domain '${domain}'"; exit 1; }
+    validate_php_version "$php_ver" || { error "Invalid PHP version. Use: 8.1 8.2 8.3 8.4"; exit 1; }
+    php_is_installed "$php_ver"    || { error "PHP $php_ver not installed. Run: cipi php install $php_ver"; exit 1; }
+    app_exists "$app_user"         && { error "App '${app_user}' already exists"; exit 1; }
+    id "$app_user" &>/dev/null     && { error "User '${app_user}' already exists"; exit 1; }
+
+    echo ""; info "Creating '${app_user}'..."; echo ""
+
+    local user_pass db_pass webhook_token app_key redis_db home
+    user_pass=$(generate_password 24)
+    db_pass=$(generate_password 32)
+    webhook_token=$(generate_token)
+    app_key=$(generate_app_key)
+    redis_db=$(get_next_redis_db)
+    home="/home/${app_user}"
+
+    # 1. Linux user
+    step "Creating user..."
+    useradd -m -s /bin/bash -G www-data "$app_user"
+    echo "${app_user}:${user_pass}" | chpasswd
+    chmod 750 "$home"
+    usermod -aG "$app_user" www-data
+    success "User"
+
+    # 2. Directories
+    step "Directories..."
+    mkdir -p "${home}"/{shared/storage/{app/public,framework/{cache/data,sessions,views},logs},logs,.ssh,.deployer}
+    cat > "${home}/.bashrc" <<BASH
+export PATH="/usr/local/bin:\$PATH"
+alias php='/usr/bin/php${php_ver}'
+alias artisan='php ${home}/current/artisan'
+alias composer='/usr/local/bin/composer'
+alias tinker='artisan tinker'
+alias deploy='dep deploy -f ${home}/.deployer/deploy.php'
+PS1='\[\033[0;32m\]\u\[\033[0m\]@\h:\[\033[0;34m\]\w\[\033[0m\]\$ '
+BASH
+    chown -R "${app_user}:${app_user}" "$home"
+    success "Directories"
+
+    # 3. SSH deploy key
+    step "Deploy key..."
+    sudo -u "$app_user" ssh-keygen -t ed25519 -C "${app_user}@cipi" -f "${home}/.ssh/id_ed25519" -N "" -q
+    local deploy_key; deploy_key=$(cat "${home}/.ssh/id_ed25519.pub")
+    success "Deploy key"
+
+    # 4. MariaDB database
+    step "Database..."
+    local db_root; db_root=$(get_db_root_password)
+    mysql -u root -p"${db_root}" <<SQL
+CREATE DATABASE IF NOT EXISTS \`${app_user}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '${app_user}'@'localhost' IDENTIFIED BY '${db_pass}';
+GRANT ALL PRIVILEGES ON \`${app_user}\`.* TO '${app_user}'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+    success "Database"
+
+    # 5. .env (auto-compiled by Cipi)
+    step ".env..."
+    cat > "${home}/shared/.env" <<ENV
+APP_NAME="${app_user}"
+APP_ENV=production
+APP_KEY=${app_key}
+APP_DEBUG=false
+APP_URL=https://${domain}
+
+LOG_CHANNEL=daily
+LOG_LEVEL=error
+
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=${app_user}
+DB_USERNAME=${app_user}
+DB_PASSWORD=${db_pass}
+
+BROADCAST_CONNECTION=log
+CACHE_STORE=redis
+SESSION_DRIVER=redis
+QUEUE_CONNECTION=redis
+
+REDIS_HOST=127.0.0.1
+REDIS_PASSWORD=null
+REDIS_PORT=6379
+REDIS_DB=${redis_db}
+REDIS_CACHE_DB=${redis_db}
+
+MAIL_MAILER=log
+
+CIPI_WEBHOOK_TOKEN=${webhook_token}
+CIPI_APP_USER=${app_user}
+CIPI_PHP_VERSION=${php_ver}
+ENV
+    chown "${app_user}:${app_user}" "${home}/shared/.env"
+    chmod 640 "${home}/shared/.env"
+    success ".env with DB + Redis + webhook"
+
+    # 6. PHP-FPM pool
+    step "PHP-FPM pool..."
+    _create_fpm_pool "$app_user" "$php_ver"
+    reload_php_fpm "$php_ver"
+    success "PHP-FPM ${php_ver}"
+
+    # 7. Nginx vhost
+    step "Nginx vhost..."
+    _create_nginx_vhost "$app_user" "$domain" "$php_ver"
+    ln -sf "/etc/nginx/sites-available/${app_user}" "/etc/nginx/sites-enabled/${app_user}"
+    reload_nginx
+    success "Nginx → ${domain}"
+
+    # 8. Supervisor default worker
+    step "Queue worker..."
+    echo "" > "/etc/supervisor/conf.d/${app_user}.conf"
+    _create_supervisor_worker "$app_user" "$php_ver" "default"
+    reload_supervisor
+    success "Worker (default queue)"
+
+    # 9. Crontab: scheduler + deploy trigger watcher
+    step "Crontab..."
+    cat <<CRON | crontab -u "$app_user" -
+# Laravel Scheduler
+* * * * * /usr/bin/php${php_ver} ${home}/current/artisan schedule:run >> /dev/null 2>&1
+# Cipi deploy trigger (written by cipi/agent webhook)
+* * * * * test -f ${home}/.deploy-trigger && rm -f ${home}/.deploy-trigger && cd ${home} && /usr/local/bin/dep deploy -f ${home}/.deployer/deploy.php >> ${home}/logs/deploy.log 2>&1
+CRON
+    success "Scheduler + deploy trigger"
+
+    # 10. Deployer config
+    step "Deployer..."
+    _create_deployer_config "$app_user" "$repository" "$branch" "$php_ver"
+    success "Deployer"
+
+    # 11. Sudoers (worker restart only)
+    step "Permissions..."
+    cat > "/etc/sudoers.d/cipi-${app_user}" <<SUDO
+${app_user} ALL=(root) NOPASSWD: /usr/local/bin/cipi-worker restart ${app_user}
+${app_user} ALL=(root) NOPASSWD: /usr/local/bin/cipi-worker status ${app_user}
+SUDO
+    chmod 440 "/etc/sudoers.d/cipi-${app_user}"
+    success "Permissions"
+
+    # 12. Save config
+    app_save "$app_user" "$(cat <<JSON
 {
-    "username": "$username",
-    "repository": "$repository",
-    "branch": "$branch",
-    "php_version": "$php_version",
-    "home_dir": "$home_dir",
-    "created_at": "$(date -Iseconds)"
+    "user": "${app_user}",
+    "domain": "${domain}",
+    "aliases": [],
+    "repository": "${repository}",
+    "branch": "${branch}",
+    "php": "${php_ver}",
+    "redis_db": "${redis_db}",
+    "webhook_token": "${webhook_token}",
+    "created_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 }
-EOF
-)
-    json_set "${VIRTUALHOSTS_FILE}" "$username" "$app_data"
-    
-    # Display summary
+JSON
+)"
+    log_action "APP CREATED: $app_user domain=$domain php=$php_ver"
+
+    # Summary
     echo ""
-    echo -e "${GREEN}${BOLD}App created successfully!${NC}"
-    echo "─────────────────────────────────────"
-    echo -e "Path:     ${CYAN}$home_dir${NC}"
-    echo -e "Username: ${CYAN}$username${NC}"
-    echo -e "Password: ${CYAN}$password${NC}"
-    echo -e "PHP:      ${CYAN}$php_version${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo -e "  ${GREEN}${BOLD}APP CREATED: ${app_user}${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo -e "  Domain:     ${CYAN}${domain}${NC}"
+    echo -e "  PHP:        ${CYAN}${php_ver}${NC}"
+    echo -e "  Home:       ${CYAN}${home}${NC}"
     echo ""
-    echo -e "${YELLOW}${BOLD}IMPORTANT: Save these credentials!${NC}"
+    echo -e "  ${BOLD}SSH${NC}         ${CYAN}${app_user}${NC} / ${CYAN}${user_pass}${NC}"
+    echo -e "  ${BOLD}Database${NC}    ${CYAN}${app_user}${NC} / ${CYAN}${db_pass}${NC}"
     echo ""
-    echo -e "${CYAN}Git SSH Public Key:${NC}"
-    echo -e "Add this key to your Git provider (GitHub/GitLab) for private repositories:"
+    echo -e "  ${BOLD}Deploy Key${NC}  (add to your Git provider)"
+    echo -e "  ${CYAN}${deploy_key}${NC}"
     echo ""
-    cat "$home_dir/gitkey.pub"
+    echo -e "  ${BOLD}Webhook${NC}     ${CYAN}https://${domain}/cipi/webhook${NC}"
+    echo -e "  ${BOLD}Token${NC}       ${CYAN}${webhook_token}${NC}"
     echo ""
-    echo -e "Key also available at: ${CYAN}$home_dir/gitkey.pub${NC}"
+    echo -e "  ${BOLD}Next:${NC} composer require cipi/agent  (in your Laravel project)"
+    echo -e "        cipi deploy ${app_user}"
+    echo -e "        cipi ssl install ${app_user}"
     echo ""
-    echo -e "${CYAN}${BOLD}Next Steps:${NC}"
-    echo -e "1. Configure S3 backup: ${CYAN}nano $home_dir/backup.sh${NC}"
-    echo -e "2. Setup deployment: ${CYAN}$home_dir/deploy.sh${NC}"
-    echo -e "3. Assign domain: ${CYAN}cipi domain create${NC}"
-    echo ""
+    echo -e "  ${YELLOW}${BOLD}⚠ SAVE THESE CREDENTIALS — shown only once${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
-# List apps
+# ── LIST ──────────────────────────────────────────────────────
+
 app_list() {
-    init_storage
-    
-    echo -e "${BOLD}Apps${NC}"
-    echo "─────────────────────────────────────"
-    echo ""
-    
-    local apps=$(json_keys "${VIRTUALHOSTS_FILE}")
-    
-    if [ -z "$apps" ]; then
-        echo "No virtual hosts found."
-        echo ""
-        return
+    if [[ ! -f "${CIPI_CONFIG}/apps.json" ]] || [[ $(jq 'length' "${CIPI_CONFIG}/apps.json") -eq 0 ]]; then
+        info "No apps. Create one: cipi app create"; return
     fi
-    
-    printf "%-15s %-10s %-30s\n" "USERNAME" "PHP" "DOMAIN"
-    echo "───────────────────────────────────────────────────────────"
-    
-    for username in $apps; do
-        local vhost=$(json_get "${VIRTUALHOSTS_FILE}" "$username")
-        local php_version=$(echo "$vhost" | jq -r '.php_version')
-        local domain=$(get_domain_by_app "$username")
-        domain=${domain:-"(no domain)"}
-        
-        printf "%-15s %-10s %-30s\n" "$username" "$php_version" "$domain"
-    done
-    
-    echo ""
+    printf "\n${BOLD}%-14s %-28s %-6s %-8s %s${NC}\n" "APP" "DOMAIN" "PHP" "REDIS" "CREATED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    jq -r 'to_entries[]|"\(.key)\t\(.value.domain)\t\(.value.php)\t\(.value.redis_db)\t\(.value.created_at)"' \
+        "${CIPI_CONFIG}/apps.json" | while IFS=$'\t' read -r a d p r c; do
+        local st="${GREEN}●${NC}"
+        systemctl is-active --quiet "php${p}-fpm" 2>/dev/null || st="${RED}●${NC}"
+        printf "  ${st} %-12s %-28s %-6s %-8s %s\n" "$a" "$d" "$p" "$r" "${c:0:10}"
+    done; echo ""
 }
 
-# Show app details
+# ── SHOW ──────────────────────────────────────────────────────
+
 app_show() {
-    local username=$1
-    
-    if [ -z "$username" ]; then
-        echo -e "${RED}Error: Username required${NC}"
-        echo "Usage: cipi app show <username>"
-        exit 1
+    local app="${1:-}"; [[ -z "$app" ]] && { error "Usage: cipi app show <app>"; exit 1; }
+    app_exists "$app" || { error "App '$app' not found"; exit 1; }
+
+    local d p b repo rdb wt ca aliases
+    d=$(app_get "$app" domain); p=$(app_get "$app" php); b=$(app_get "$app" branch)
+    repo=$(app_get "$app" repository); rdb=$(app_get "$app" redis_db)
+    wt=$(app_get "$app" webhook_token); ca=$(app_get "$app" created_at)
+    aliases=$(jq -r --arg a "$app" '.[$a].aliases//[]|join(", ")' "${CIPI_CONFIG}/apps.json")
+    [[ -z "$aliases" ]] && aliases="none"
+
+    echo -e "\n${BOLD}${app}${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    printf "  %-14s ${CYAN}%s${NC}\n" "Domain" "$d"
+    printf "  %-14s ${CYAN}%s${NC}\n" "Aliases" "$aliases"
+    printf "  %-14s ${CYAN}%s${NC}\n" "Repository" "$repo"
+    printf "  %-14s ${CYAN}%s${NC}\n" "Branch" "$b"
+    printf "  %-14s ${CYAN}%s${NC}\n" "PHP" "$p"
+    printf "  %-14s ${CYAN}%s${NC}\n" "Redis DB" "$rdb"
+    printf "  %-14s ${CYAN}%s${NC}\n" "Created" "$ca"
+    echo -e "\n  ${BOLD}Webhook${NC}  ${CYAN}https://${d}/cipi/webhook${NC}"
+
+    if [[ -f "/home/${app}/.ssh/id_ed25519.pub" ]]; then
+        echo -e "\n  ${BOLD}Deploy Key${NC}\n  ${CYAN}$(cat "/home/${app}/.ssh/id_ed25519.pub")${NC}"
     fi
-    
-    if ! json_has_key "${VIRTUALHOSTS_FILE}" "$username"; then
-        echo -e "${RED}Error: App '$username' not found${NC}"
-        exit 1
+    if [[ -L "/home/${app}/current" ]]; then
+        echo -e "\n  ${BOLD}Release${NC}  ${CYAN}$(readlink -f "/home/${app}/current" | xargs basename)${NC}"
     fi
-    
-    local vhost=$(json_get "${VIRTUALHOSTS_FILE}" "$username")
-    local home_dir=$(echo "$vhost" | jq -r '.home_dir')
-    local php_version=$(echo "$vhost" | jq -r '.php_version')
-    local repository=$(echo "$vhost" | jq -r '.repository')
-    local branch=$(echo "$vhost" | jq -r '.branch')
-    local domain=$(get_domain_by_app "$username")
-    local aliases=$(get_aliases_by_app "$username")
-    local disk_space=$(get_disk_space "$home_dir")
-    
-    echo -e "${BOLD}App: $username${NC}"
-    echo "─────────────────────────────────────"
-    echo -e "Path:       ${CYAN}$home_dir${NC}"
-    echo -e "Username:   ${CYAN}$username${NC}"
-    echo -e "PHP:        ${CYAN}$php_version${NC}"
-    echo -e "Repository: ${CYAN}$repository${NC}"
-    echo -e "Branch:     ${CYAN}$branch${NC}"
-    echo -e "Domain:     ${CYAN}${domain:-(no domain)}${NC}"
-    echo -e "Aliases:    ${CYAN}${aliases:-(none)}${NC}"
-    echo -e "Disk Space: ${CYAN}$disk_space${NC}"
-    echo ""
-    echo -e "${BOLD}Git SSH Public Key:${NC}"
-    if [ -f "$home_dir/gitkey.pub" ]; then
-        cat "$home_dir/gitkey.pub"
-        echo ""
-        echo -e "Location: ${CYAN}$home_dir/gitkey.pub${NC}"
-    else
-        echo -e "${RED}Not found${NC}"
-    fi
+    echo -e "\n  ${BOLD}Workers${NC}"
+    supervisorctl status "${app}-worker-*" 2>/dev/null | sed 's/^/  /' || echo "  none"
     echo ""
 }
 
-# Edit app
+# ── EDIT ──────────────────────────────────────────────────────
+
 app_edit() {
-    local username=""
-    local new_php_version=""
-    
-    # Parse arguments
-    for arg in "$@"; do
-        case $arg in
-            --php=*)
-                new_php_version="${arg#*=}"
-                ;;
-            *)
-                if [ -z "$username" ]; then
-                    username="$arg"
-                fi
-                ;;
-        esac
-    done
-    
-    if [ -z "$username" ]; then
-        echo -e "${RED}Error: Username required${NC}"
-        echo "Usage: cipi app edit <username> --php=X.X"
-        exit 1
+    local app="${1:-}"; shift || true
+    [[ -z "$app" ]] && { error "Usage: cipi app edit <app> [--php=X.Y] [--branch=B] [--repository=URL]"; exit 1; }
+    app_exists "$app" || { error "App '$app' not found"; exit 1; }
+    parse_args "$@"
+    local changed=false cur_php; cur_php=$(app_get "$app" php)
+
+    if [[ -n "${ARG_php:-}" ]]; then
+        local np="${ARG_php}"
+        validate_php_version "$np" || { error "Invalid PHP: $np"; exit 1; }
+        php_is_installed "$np" || { error "PHP $np not installed"; exit 1; }
+        step "PHP ${cur_php} → ${np}..."
+        rm -f "/etc/php/${cur_php}/fpm/pool.d/${app}.conf"
+        _create_fpm_pool "$app" "$np"; reload_php_fpm "$cur_php"; reload_php_fpm "$np"
+        local dom; dom=$(app_get "$app" domain)
+        _create_nginx_vhost "$app" "$dom" "$np"; reload_nginx
+        sed -i "s|/usr/bin/php[0-9]\.[0-9]|/usr/bin/php${np}|g" "/etc/supervisor/conf.d/${app}.conf" 2>/dev/null
+        reload_supervisor
+        crontab -u "$app" -l 2>/dev/null | sed "s|php${cur_php}|php${np}|g" | crontab -u "$app" -
+        sed -i "s|php${cur_php}|php${np}|g" "/home/${app}/.bashrc" "/home/${app}/.deployer/deploy.php" 2>/dev/null
+        sed -i "s|^CIPI_PHP_VERSION=.*|CIPI_PHP_VERSION=${np}|" "/home/${app}/shared/.env"
+        app_set "$app" php "$np"; success "PHP → $np"; changed=true
     fi
-    
-    if ! json_has_key "${VIRTUALHOSTS_FILE}" "$username"; then
-        echo -e "${RED}Error: App '$username' not found${NC}"
-        exit 1
+    if [[ -n "${ARG_branch:-}" ]]; then
+        app_set "$app" branch "${ARG_branch}"
+        sed -i "s|set('branch', '.*')|set('branch', '${ARG_branch}')|" "/home/${app}/.deployer/deploy.php"
+        success "Branch → ${ARG_branch}"; changed=true
     fi
-    
-    # Get current app data
-    local vhost=$(json_get "${VIRTUALHOSTS_FILE}" "$username")
-    local current_php=$(echo "$vhost" | jq -r '.php_version')
-    local home_dir=$(echo "$vhost" | jq -r '.home_dir')
-    
-    # Edit PHP version
-    if [ -n "$new_php_version" ]; then
-        echo -e "${CYAN}Changing PHP version from $current_php to $new_php_version...${NC}"
-        
-        # Check if new PHP version is installed
-        if ! is_php_installed "$new_php_version"; then
-            echo -e "${YELLOW}PHP $new_php_version is not installed. Installing...${NC}"
-            install_php_version "$new_php_version"
-        fi
-        
-        # Delete old PHP pool
-        echo "  → Removing old PHP-FPM pool..."
-        delete_php_pool "$username" "$current_php"
-        
-        # Create new PHP pool
-        echo "  → Creating new PHP-FPM pool..."
-        create_php_pool "$username" "$new_php_version"
-        
-        # Update Nginx configuration
-        echo "  → Updating Nginx configuration..."
-        local domain=$(get_domain_by_app "$username")
-        if [ -n "$domain" ]; then
-            local domain_data=$(json_get "${DOMAINS_FILE}" "$domain")
-            local ssl=$(echo "$domain_data" | jq -r '.ssl')
-            local aliases=$(echo "$domain_data" | jq -r '.aliases[]?' 2>/dev/null | tr '\n' ' ')
-            
-            if [ "$ssl" = "true" ]; then
-                add_ssl_to_nginx "$username" "$domain" "$aliases" "$new_php_version"
-            else
-                create_nginx_config "$username" "$domain" "$new_php_version"
-            fi
-        else
-            create_nginx_config "$username" "" "$new_php_version"
-        fi
-        
-        # Update storage
-        local tmp=$(mktemp)
-        echo "$vhost" | jq ".php_version = \"$new_php_version\"" > "$tmp"
-        local updated_vhost=$(cat "$tmp")
-        rm "$tmp"
-        json_set "${VIRTUALHOSTS_FILE}" "$username" "$updated_vhost"
-        
-        # Reload services
-        echo "  → Reloading services..."
-        nginx_reload
-        
-        echo ""
-        echo -e "${GREEN}PHP version updated successfully!${NC}"
-        echo -e "Old version: ${CYAN}$current_php${NC}"
-        echo -e "New version: ${CYAN}$new_php_version${NC}"
-        echo ""
-    else
-        echo -e "${RED}Error: No changes specified${NC}"
-        echo "Usage: cipi app edit <username> --php=X.X"
-        exit 1
+    if [[ -n "${ARG_repository:-}" ]]; then
+        app_set "$app" repository "${ARG_repository}"
+        sed -i "s|set('repository', '.*')|set('repository', '${ARG_repository}')|" "/home/${app}/.deployer/deploy.php"
+        success "Repository updated"; changed=true
     fi
+    [[ "$changed" == false ]] && info "Nothing changed. Use --php, --branch, or --repository"
+    [[ "$changed" == true ]] && log_action "APP EDITED: $app $*"
 }
 
-# Edit app .env file
-app_env() {
-    local username=$1
-    
-    if [ -z "$username" ]; then
-        echo -e "${RED}Error: Username required${NC}"
-        echo "Usage: cipi app env <username>"
-        exit 1
-    fi
-    
-    if ! json_has_key "${VIRTUALHOSTS_FILE}" "$username"; then
-        echo -e "${RED}Error: App '$username' not found${NC}"
-        exit 1
-    fi
-    
-    local vhost=$(json_get "${VIRTUALHOSTS_FILE}" "$username")
-    local home_dir=$(echo "$vhost" | jq -r '.home_dir')
-    local env_file="$home_dir/wwwroot/.env"
-    
-    if [ ! -f "$env_file" ]; then
-        echo -e "${YELLOW}Warning: .env file not found at $env_file${NC}"
-        echo ""
-        read -p "Do you want to create it from .env.example? (y/N): " create_env
-        
-        if [ "$create_env" = "y" ] || [ "$create_env" = "Y" ]; then
-            if [ -f "$home_dir/wwwroot/.env.example" ]; then
-                cp "$home_dir/wwwroot/.env.example" "$env_file"
-                chown "$username:$username" "$env_file"
-                chmod 644 "$env_file"
-                echo -e "${GREEN}Created .env from .env.example${NC}"
-            else
-                echo -e "${RED}Error: .env.example not found${NC}"
-                exit 1
-            fi
-        else
-            exit 0
-        fi
-    fi
-    
-    echo -e "${CYAN}Opening .env editor for: $username${NC}"
-    echo -e "File: ${CYAN}$env_file${NC}"
-    echo ""
-    echo -e "${YELLOW}Tip: After editing, restart PHP-FPM if needed:${NC}"
-    echo -e "  ${CYAN}cipi service restart php${NC}"
-    echo ""
-    sleep 2
-    
-    # Set nano as editor and open file as the app user
-    export EDITOR=nano
-    export VISUAL=nano
-    sudo -u "$username" -E nano "$env_file"
-    
-    echo ""
-    echo -e "${GREEN}.env file saved${NC}"
-    echo ""
-}
+# ── DELETE ────────────────────────────────────────────────────
 
-# Edit app crontab
-app_crontab() {
-    local username=$1
-    
-    if [ -z "$username" ]; then
-        echo -e "${RED}Error: Username required${NC}"
-        echo "Usage: cipi app crontab <username>"
-        exit 1
-    fi
-    
-    if ! json_has_key "${APPS_FILE}" "$username"; then
-        echo -e "${RED}Error: App '$username' not found${NC}"
-        exit 1
-    fi
-    
-    echo -e "${BOLD}Edit Crontab for: $username${NC}"
-    echo "─────────────────────────────────────"
-    echo ""
-    echo -e "${CYAN}Opening crontab editor...${NC}"
-    echo ""
-    echo -e "${YELLOW}Tip: Add this line for Laravel scheduler:${NC}"
-    echo -e "  ${CYAN}* * * * * cd /home/$username/wwwroot && php artisan schedule:run >> /dev/null 2>&1${NC}"
-    echo ""
-    echo -e "${YELLOW}Tip: Example backup at 2 AM daily:${NC}"
-    echo -e "  ${CYAN}0 2 * * * /home/$username/backup.sh >> /home/$username/logs/backup.log 2>&1${NC}"
-    echo ""
-    sleep 3
-    
-    # Set nano as editor and open crontab as the app user
-    export EDITOR=nano
-    export VISUAL=nano
-    sudo -u "$username" -E crontab -e
-    
-    echo ""
-    echo -e "${GREEN}Crontab updated${NC}"
-    echo ""
-    echo -e "${CYAN}View current crontab:${NC}"
-    echo -e "  sudo crontab -u $username -l"
-    echo ""
-}
-
-# Change app password
-app_password() {
-    local username=$1
-    local new_password=""
-    
-    # Parse arguments
-    for arg in "$@"; do
-        case $arg in
-            --password=*)
-                new_password="${arg#*=}"
-                ;;
-        esac
-    done
-    
-    if [ -z "$username" ]; then
-        echo -e "${RED}Error: Username required${NC}"
-        echo "Usage: cipi app password <username> [--password=XXX]"
-        exit 1
-    fi
-    
-    if ! json_has_key "${VIRTUALHOSTS_FILE}" "$username"; then
-        echo -e "${RED}Error: App '$username' not found${NC}"
-        exit 1
-    fi
-    
-    echo -e "${BOLD}Change Password for: $username${NC}"
-    echo "─────────────────────────────────────"
-    echo ""
-    
-    # Generate or use provided password
-    if [ -z "$new_password" ]; then
-        new_password=$(generate_password 24)
-        echo "Generated new password: ${CYAN}$new_password${NC}"
-    else
-        echo "Using provided password"
-    fi
-    
-    echo ""
-    echo -e "${CYAN}Changing password...${NC}"
-    
-    # Change system user password
-    echo "$username:$new_password" | chpasswd
-    
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}Error: Failed to change password${NC}"
-        exit 1
-    fi
-    
-    # Note: Password is not stored in JSON for security reasons
-    
-    echo ""
-    echo -e "${GREEN}${BOLD}Password changed successfully!${NC}"
-    echo "─────────────────────────────────────"
-    echo -e "Username: ${CYAN}$username${NC}"
-    echo -e "New Password: ${CYAN}$new_password${NC}"
-    echo ""
-    echo -e "${YELLOW}${BOLD}IMPORTANT: Save this password!${NC}"
-    echo ""
-}
-
-# Delete app
 app_delete() {
-    local username=$1
-    
-    if [ -z "$username" ]; then
-        echo -e "${RED}Error: Username required${NC}"
-        echo "Usage: cipi app delete <username>"
-        exit 1
-    fi
-    
-    if ! json_has_key "${VIRTUALHOSTS_FILE}" "$username"; then
-        echo -e "${RED}Error: App '$username' not found${NC}"
-        exit 1
-    fi
-    
-    # Confirm deletion
-    echo -e "${YELLOW}${BOLD}Warning: This will permanently delete the virtual host and all its data!${NC}"
-    read -p "Type the username to confirm: " confirm
-    
-    if [ "$confirm" != "$username" ]; then
-        echo "Deletion cancelled."
-        exit 0
-    fi
-    
-    echo ""
-    echo -e "${CYAN}Deleting virtual host...${NC}"
-    
-    local vhost=$(json_get "${VIRTUALHOSTS_FILE}" "$username")
-    local php_version=$(echo "$vhost" | jq -r '.php_version')
-    
-    # Delete associated domains
-    echo "  → Deleting associated domains..."
-    delete_domains_by_app "$username"
-    
-    # Delete Nginx configuration
-    echo "  → Deleting Nginx configuration..."
-    delete_nginx_config "$username"
-    
-    # Delete PHP-FPM pool
-    echo "  → Deleting PHP-FPM pool..."
-    delete_php_pool "$username" "$php_version"
-    
-    # Delete system user and home directory
-    echo "  → Deleting system user and files..."
-    delete_system_user "$username"
-    
-    # Remove from storage
-    json_delete "${VIRTUALHOSTS_FILE}" "$username"
-    
-    # Reload nginx
-    echo "  → Reloading Nginx..."
-    nginx_reload
-    
-    echo ""
-    echo -e "${GREEN}App deleted successfully!${NC}"
-    echo ""
+    local app="${1:-}"; [[ -z "$app" ]] && { error "Usage: cipi app delete <app>"; exit 1; }
+    app_exists "$app" || { error "App '$app' not found"; exit 1; }
+    local d; d=$(app_get "$app" domain); local p; p=$(app_get "$app" php)
+
+    echo ""; warn "Will permanently delete: user, home, database, vhost, workers, SSL"
+    confirm "Delete '${app}'?" || { info "Cancelled"; return; }
+
+    step "Workers...";     supervisorctl stop "${app}-worker-*" 2>/dev/null||true; rm -f "/etc/supervisor/conf.d/${app}.conf"; reload_supervisor
+    step "Nginx...";       rm -f "/etc/nginx/sites-enabled/${app}" "/etc/nginx/sites-available/${app}"; reload_nginx
+    step "PHP-FPM...";     rm -f "/etc/php/${p}/fpm/pool.d/${app}.conf"; reload_php_fpm "$p" 2>/dev/null||true
+    step "Database...";    local dbr; dbr=$(get_db_root_password); mysql -u root -p"$dbr" -e "DROP DATABASE IF EXISTS \`${app}\`; DROP USER IF EXISTS '${app}'@'localhost'; FLUSH PRIVILEGES;" 2>/dev/null||true
+    step "Crontab...";     crontab -u "$app" -r 2>/dev/null||true
+    step "Sudoers...";     rm -f "/etc/sudoers.d/cipi-${app}"
+    step "SSL...";         certbot delete --cert-name "$d" --non-interactive 2>/dev/null||true
+    step "User & files..."; userdel -r "$app" 2>/dev/null||true
+    step "Config...";      app_remove "$app"
+
+    log_action "APP DELETED: $app"
+    echo ""; success "'${app}' deleted"; echo ""
 }
 
-# Helper: Get domain by app
-get_domain_by_app() {
-    local username=$1
-    local domains=$(json_read "${DOMAINS_FILE}")
-    
-    echo "$domains" | jq -r "to_entries[] | select(.value.app == \"$username\") | .key" | head -n 1
+# ── ENV / LOGS / TINKER / ARTISAN ─────────────────────────────
+
+app_env() {
+    local app="${1:-}"; [[ -z "$app" ]] && { error "Usage: cipi app env <app>"; exit 1; }
+    app_exists "$app" || { error "Not found"; exit 1; }
+    ${EDITOR:-nano} "/home/${app}/shared/.env"
+    chown "${app}:${app}" "/home/${app}/shared/.env"; chmod 640 "/home/${app}/shared/.env"
+    success ".env updated"
 }
 
-# Helper: Get aliases by app
-get_aliases_by_app() {
-    local username=$1
-    local domain=$(get_domain_by_app "$username")
-    
-    if [ -n "$domain" ]; then
-        local domain_data=$(json_get "${DOMAINS_FILE}" "$domain")
-        echo "$domain_data" | jq -r '.aliases[]?' 2>/dev/null | tr '\n' ', ' | sed 's/,$//'
-    fi
+app_logs() {
+    local app="${1:-}"; shift||true
+    [[ -z "$app" ]] && { error "Usage: cipi app logs <app> [--type=nginx|php|worker|deploy|all]"; exit 1; }
+    app_exists "$app" || { error "Not found"; exit 1; }
+    parse_args "$@"
+    case "${ARG_type:-all}" in
+        nginx)  tail -f "/home/${app}/logs/nginx-"*.log ;;
+        php)    tail -f "/home/${app}/logs/php-fpm-"*.log ;;
+        worker) tail -f "/home/${app}/logs/worker-"*.log ;;
+        deploy) tail -f "/home/${app}/logs/deploy.log" ;;
+        all)    tail -f "/home/${app}/logs/"*.log ;;
+    esac
 }
 
-# Helper: Delete domains by app
-delete_domains_by_app() {
-    local username=$1
-    local domains=$(json_read "${DOMAINS_FILE}")
-    
-    local domain_keys=$(echo "$domains" | jq -r "to_entries[] | select(.value.app == \"$username\") | .key")
-    
-    for domain in $domain_keys; do
-        json_delete "${DOMAINS_FILE}" "$domain"
-    done
+app_tinker() {
+    local app="${1:-}"; [[ -z "$app" ]] && { error "Usage: cipi app tinker <app>"; exit 1; }
+    app_exists "$app" || { error "Not found"; exit 1; }
+    local p; p=$(app_get "$app" php)
+    sudo -u "$app" /usr/bin/php"$p" "/home/${app}/current/artisan" tinker
 }
 
-# Helper: Setup Laravel
-setup_laravel() {
-    local username=$1
-    local home_dir="/home/$username"
-    local wwwroot="$home_dir/wwwroot"
-    
-    cd "$wwwroot"
-    
-    # Install composer dependencies
-    sudo -u "$username" composer install --no-interaction --prefer-dist --optimize-autoloader 2>/dev/null
-    
-    # Create .env if not exists
-    if [ ! -f "$wwwroot/.env" ] && [ -f "$wwwroot/.env.example" ]; then
-        sudo -u "$username" cp "$wwwroot/.env.example" "$wwwroot/.env"
-        sudo -u "$username" php artisan key:generate
-    fi
-    
-    # Set permissions
-    chown -R "$username:$username" "$wwwroot"
-    chmod -R 755 "$wwwroot/storage"
-    chmod -R 755 "$wwwroot/bootstrap/cache"
+app_artisan() {
+    local app="${1:-}"; shift||true
+    [[ -z "$app" ]] && { error "Usage: cipi app artisan <app> <cmd>"; exit 1; }
+    app_exists "$app" || { error "Not found"; exit 1; }
+    [[ $# -eq 0 ]] && { error "No artisan command"; exit 1; }
+    local p; p=$(app_get "$app" php)
+    sudo -u "$app" /usr/bin/php"$p" "/home/${app}/current/artisan" "$@"
 }
 
-# Helper: Setup user crontab
-setup_user_crontab() {
-    local username=$1
-    local home_dir="/home/$username"
-    
-    # Create crontab for Laravel scheduler (if Laravel detected)
-    if [ -f "$home_dir/wwwroot/artisan" ]; then
-        (crontab -u "$username" -l 2>/dev/null; echo "* * * * * cd $home_dir/wwwroot && php artisan schedule:run >> /dev/null 2>&1") | crontab -u "$username" -
-    fi
+# ── ALIAS ─────────────────────────────────────────────────────
+
+alias_add() {
+    local app="${1:-}" dom="${2:-}"
+    [[ -z "$app" || -z "$dom" ]] && { error "Usage: cipi alias add <app> <domain>"; exit 1; }
+    app_exists "$app" || { error "Not found"; exit 1; }
+    validate_domain "$dom" || { error "Invalid domain"; exit 1; }
+    local tmp; tmp=$(mktemp)
+    jq --arg a "$app" --arg d "$dom" '.[$a].aliases+=[$d]|.[$a].aliases|=unique' "${CIPI_CONFIG}/apps.json">"$tmp"
+    mv "$tmp" "${CIPI_CONFIG}/apps.json"; chmod 600 "${CIPI_CONFIG}/apps.json"
+    _create_nginx_vhost "$app" "$(app_get "$app" domain)" "$(app_get "$app" php)"; reload_nginx
+    log_action "ALIAS ADDED: $dom → $app"
+    success "'${dom}' added to '${app}'"
+    info "Run: cipi ssl install ${app}  (to update certificate)"
 }
 
-# Helper: Setup log rotation
-setup_log_rotation() {
-    local username=$1
-    local log_dir="/home/$username/logs"
-    
-    cat > "/etc/logrotate.d/cipi-$username" <<EOF
-$log_dir/*.log {
-    daily
-    rotate 30
-    missingok
-    notifempty
-    compress
-    delaycompress
-    sharedscripts
-    postrotate
-        systemctl reload nginx > /dev/null 2>&1
-    endscript
+alias_remove() {
+    local app="${1:-}" dom="${2:-}"
+    [[ -z "$app" || -z "$dom" ]] && { error "Usage: cipi alias remove <app> <domain>"; exit 1; }
+    app_exists "$app" || { error "Not found"; exit 1; }
+    local tmp; tmp=$(mktemp)
+    jq --arg a "$app" --arg d "$dom" '.[$a].aliases-=[$d]' "${CIPI_CONFIG}/apps.json">"$tmp"
+    mv "$tmp" "${CIPI_CONFIG}/apps.json"; chmod 600 "${CIPI_CONFIG}/apps.json"
+    _create_nginx_vhost "$app" "$(app_get "$app" domain)" "$(app_get "$app" php)"; reload_nginx
+    success "'${dom}' removed from '${app}'"
+}
+
+alias_list() {
+    local app="${1:-}"; [[ -z "$app" ]] && { error "Usage: cipi alias list <app>"; exit 1; }
+    app_exists "$app" || { error "Not found"; exit 1; }
+    echo -e "\n${BOLD}Domains for '${app}'${NC}"
+    echo -e "  Primary: ${CYAN}$(app_get "$app" domain)${NC}"
+    jq -r --arg a "$app" '.[$a].aliases[]?//empty' "${CIPI_CONFIG}/apps.json" | while read -r a; do
+        echo -e "  Alias:   ${CYAN}${a}${NC}"
+    done; echo ""
+}
+
+# ── HELPERS ───────────────────────────────────────────────────
+
+_create_fpm_pool() {
+    local app="$1" v="$2"
+    cat > "/etc/php/${v}/fpm/pool.d/${app}.conf" <<EOF
+[${app}]
+user = ${app}
+group = ${app}
+listen = /run/php/${app}.sock
+listen.owner = ${app}
+listen.group = www-data
+listen.mode = 0660
+pm = dynamic
+pm.max_children = 5
+pm.start_servers = 2
+pm.min_spare_servers = 1
+pm.max_spare_servers = 3
+pm.max_requests = 500
+request_terminate_timeout = 300
+php_admin_value[open_basedir] = /home/${app}/:/tmp/:/proc/
+php_admin_value[upload_max_filesize] = 256M
+php_admin_value[post_max_size] = 256M
+php_admin_value[memory_limit] = 256M
+php_admin_value[max_execution_time] = 300
+php_admin_value[error_log] = /home/${app}/logs/php-fpm-error.log
+php_admin_flag[log_errors] = on
+EOF
+}
+
+_create_nginx_vhost() {
+    local app="$1" domain="$2" v="$3"
+    local names="$domain"
+    local aliases; aliases=$(jq -r --arg a "$app" '.[$a].aliases[]?//empty' "${CIPI_CONFIG}/apps.json" 2>/dev/null)
+    [[ -n "$aliases" ]] && names="$domain $aliases"
+    cat > "/etc/nginx/sites-available/${app}" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${names};
+    root /home/${app}/current/public;
+    index index.php;
+    access_log /home/${app}/logs/nginx-access.log;
+    error_log /home/${app}/logs/nginx-error.log;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    client_max_body_size 256M;
+    location / {
+        try_files \$uri \$uri/ /index.php?\$query_string;
+    }
+    location ~ \.php$ {
+        fastcgi_pass unix:/run/php/${app}.sock;
+        fastcgi_param SCRIPT_FILENAME \$realpath_root\$fastcgi_script_name;
+        include fastcgi_params;
+        fastcgi_hide_header X-Powered-By;
+        fastcgi_read_timeout 300;
+    }
+    location ~ /\.(?!well-known) { deny all; }
+    location = /favicon.ico { access_log off; log_not_found off; }
+    location = /robots.txt  { access_log off; log_not_found off; }
+    error_page 404 /index.php;
 }
 EOF
 }
 
+_create_supervisor_worker() {
+    local app="$1" v="$2" queue="${3:-default}" procs="${4:-1}" tries="${5:-3}" timeout="${6:-3600}"
+    cat >> "/etc/supervisor/conf.d/${app}.conf" <<EOF
+[program:${app}-worker-${queue}]
+process_name=%(program_name)s_%(process_num)02d
+command=/usr/bin/php${v} /home/${app}/current/artisan queue:work redis --sleep=3 --tries=${tries} --max-time=${timeout} --queue=${queue}
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+user=${app}
+numprocs=${procs}
+redirect_stderr=true
+stdout_logfile=/home/${app}/logs/worker-${queue}.log
+stdout_logfile_maxbytes=10MB
+stopwaitsecs=${timeout}
+EOF
+}
+
+_create_deployer_config() {
+    local app="$1" repo="$2" branch="$3" v="$4" home="/home/${app}"
+    cat > "${home}/.deployer/deploy.php" <<'PHPTOP'
+<?php
+namespace Deployer;
+require 'recipe/laravel.php';
+
+PHPTOP
+    cat >> "${home}/.deployer/deploy.php" <<PHP
+set('application', '${app}');
+set('repository', '${repo}');
+set('branch', '${branch}');
+set('deploy_path', '${home}');
+set('keep_releases', 5);
+set('git_ssh_command', 'ssh -i ${home}/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new');
+set('bin/php', '/usr/bin/php${v}');
+set('writable_mode', 'chmod');
+
+add('shared_files', ['.env']);
+add('shared_dirs', ['storage']);
+add('writable_dirs', [
+    'bootstrap/cache', 'storage', 'storage/app', 'storage/app/public',
+    'storage/framework', 'storage/framework/cache', 'storage/framework/cache/data',
+    'storage/framework/sessions', 'storage/framework/views', 'storage/logs',
+]);
+
+host('localhost')
+    ->set('remote_user', '${app}')
+    ->set('deploy_path', '${home}');
+
+after('deploy:vendors', 'artisan:storage:link');
+after('deploy:vendors', 'artisan:optimize');
+after('deploy:symlink', 'workers:restart');
+
+task('workers:restart', function () {
+    run('sudo /usr/local/bin/cipi-worker restart ${app}');
+});
+PHP
+    chown -R "${app}:${app}" "${home}/.deployer"
+}
+
+# ── ROUTERS ───────────────────────────────────────────────────
+
+app_command() {
+    local sub="${1:-}"; shift||true
+    case "$sub" in
+        create)  app_create "$@" ;;
+        list|ls) app_list ;;
+        show)    app_show "$@" ;;
+        edit)    app_edit "$@" ;;
+        delete)  app_delete "$@" ;;
+        env)     app_env "$@" ;;
+        logs)    app_logs "$@" ;;
+        tinker)  app_tinker "$@" ;;
+        artisan) app_artisan "$@" ;;
+        *) error "Unknown: $sub"; echo "Use: create list show edit delete env logs tinker artisan"; exit 1 ;;
+    esac
+}
+
+alias_command() {
+    local sub="${1:-}"; shift||true
+    case "$sub" in
+        add)    alias_add "$@" ;;
+        remove) alias_remove "$@" ;;
+        list)   alias_list "$@" ;;
+        *) error "Unknown: $sub"; echo "Use: add remove list"; exit 1 ;;
+    esac
+}

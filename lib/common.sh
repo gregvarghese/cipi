@@ -1,0 +1,105 @@
+#!/bin/bash
+#############################################
+# Cipi — Common Functions
+#############################################
+
+info()    { echo -e "${GREEN}[INFO]${NC} $*"; }
+warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
+error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+success() { echo -e "${GREEN}✓${NC} $*"; }
+step()    { echo -e "${CYAN}→${NC} $*"; }
+
+log_action() {
+    mkdir -p "${CIPI_LOG}"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "${CIPI_LOG}/cipi.log"
+}
+
+generate_password() { openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c "${1:-32}"; }
+generate_token()    { openssl rand -hex 32; }
+generate_app_key()  { echo "base64:$(openssl rand -base64 32)"; }
+
+validate_username() {
+    local n="$1"
+    [[ ! "$n" =~ ^[a-z][a-z0-9]{2,31}$ ]] && return 1
+    local bad=("root" "admin" "www" "nginx" "mysql" "mariadb" "redis" "git" "deploy" "cipi" "ubuntu" "debian" "supervisor" "nobody" "postfix" "sshd" "clamav" "daemon" "bin" "sys")
+    for b in "${bad[@]}"; do [[ "$n" == "$b" ]] && return 1; done
+    return 0
+}
+
+validate_domain() {
+    [[ "$1" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$ ]]
+}
+
+validate_php_version() {
+    case "$1" in 8.1|8.2|8.3|8.4) return 0 ;; *) return 1 ;; esac
+}
+
+php_is_installed() { dpkg -l "php${1}-fpm" &>/dev/null 2>&1; }
+
+app_exists() {
+    [[ -f "${CIPI_CONFIG}/apps.json" ]] && jq -e --arg a "$1" '.[$a]' "${CIPI_CONFIG}/apps.json" &>/dev/null
+}
+
+app_get() { jq -r --arg a "$1" --arg k "$2" '.[$a][$k] // empty' "${CIPI_CONFIG}/apps.json"; }
+
+app_set() {
+    local tmp; tmp=$(mktemp)
+    jq --arg a "$1" --arg k "$2" --arg v "$3" '.[$a][$k] = $v' "${CIPI_CONFIG}/apps.json" > "$tmp"
+    mv "$tmp" "${CIPI_CONFIG}/apps.json"; chmod 600 "${CIPI_CONFIG}/apps.json"
+}
+
+app_save() {
+    local tmp; tmp=$(mktemp)
+    jq --arg a "$1" --argjson d "$2" '.[$a] = $d' "${CIPI_CONFIG}/apps.json" > "$tmp"
+    mv "$tmp" "${CIPI_CONFIG}/apps.json"; chmod 600 "${CIPI_CONFIG}/apps.json"
+}
+
+app_remove() {
+    local tmp; tmp=$(mktemp)
+    jq --arg a "$1" 'del(.[$a])' "${CIPI_CONFIG}/apps.json" > "$tmp"
+    mv "$tmp" "${CIPI_CONFIG}/apps.json"; chmod 600 "${CIPI_CONFIG}/apps.json"
+}
+
+get_db_root_password() { jq -r '.db_root_password' "${CIPI_CONFIG}/server.json"; }
+
+get_next_redis_db() {
+    local used=()
+    [[ -f "${CIPI_CONFIG}/apps.json" ]] && mapfile -t used < <(jq -r '.[].redis_db // empty' "${CIPI_CONFIG}/apps.json")
+    for i in $(seq 1 15); do
+        local found=false
+        for u in "${used[@]:-}"; do [[ "$u" == "$i" ]] && found=true && break; done
+        [[ "$found" == "false" ]] && echo "$i" && return
+    done
+    echo "1"
+}
+
+confirm() {
+    echo -e -n "${YELLOW}${1:-Are you sure?} [y/N]: ${NC}"; read -r r; [[ "$r" =~ ^[Yy]$ ]]
+}
+
+read_input() {
+    local prompt="$1" default="${2:-}" var="$3"
+    if [[ -n "$default" ]]; then echo -e -n "${CYAN}${prompt}${NC} [${default}]: "
+    else echo -e -n "${CYAN}${prompt}${NC}: "; fi
+    read -r input; eval "$var=\"${input:-$default}\""
+}
+
+parse_args() {
+    for arg in "$@"; do
+        case "$arg" in
+            --*=*) local k="${arg%%=*}"; k="${k#--}"; eval "ARG_${k//-/_}=\"${arg#*=}\"" ;;
+            --*)   local k="${arg#--}"; eval "ARG_${k//-/_}=true" ;;
+        esac
+    done
+}
+
+reload_nginx()     { nginx -t &>/dev/null && systemctl reload nginx; }
+reload_php_fpm()   { systemctl restart "php${1}-fpm"; }
+reload_supervisor() { supervisorctl reread &>/dev/null; supervisorctl update &>/dev/null; }
+
+# Init config on source
+mkdir -p "${CIPI_CONFIG}" "${CIPI_LOG}"
+chmod 700 "${CIPI_CONFIG}"
+for f in apps.json databases.json; do
+    [[ ! -f "${CIPI_CONFIG}/$f" ]] && echo "{}" > "${CIPI_CONFIG}/$f" && chmod 600 "${CIPI_CONFIG}/$f"
+done

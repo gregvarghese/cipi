@@ -1,242 +1,66 @@
 #!/bin/bash
-
 #############################################
-# PHP Management Functions
+# Cipi — PHP Version Management
 #############################################
 
-# Get installed PHP versions
-get_installed_php_versions() {
-    if [ -d /etc/php ]; then
-        ls /etc/php | grep -E '^[0-9]+\.[0-9]+$' | sort -V
-    fi
+readonly _PHP_EXT="fpm common cli curl bcmath mbstring mysql sqlite3 pgsql redis memcached zip xml soap gd imagick intl"
+
+php_command() {
+    local sub="${1:-}"; shift||true
+    case "$sub" in
+        install) _php_install "$@" ;;
+        remove)  _php_remove "$@" ;;
+        list|ls) _php_list ;;
+        *) error "Use: install remove list"; exit 1 ;;
+    esac
 }
 
-# Check if PHP version is installed
-is_php_installed() {
-    local version=$1
-    [ -d "/etc/php/${version}" ]
-}
-
-# Install PHP version
-install_php_version() {
-    local version=$1
-    
-    echo -e "${CYAN}Installing PHP ${version}...${NC}"
-    
-    # Add ondrej/php repository
-    add-apt-repository -y ppa:ondrej/php >/dev/null 2>&1
-    apt-get update >/dev/null 2>&1
-    
-    # List of extensions to install
-    local extensions=(
-        "php${version}-fpm"
-        "php${version}-common"
-        "php${version}-cli"
-        "php${version}-curl"
-        "php${version}-bcmath"
-        "php${version}-mbstring"
-        "php${version}-mysql"
-        "php${version}-sqlite3"
-        "php${version}-pgsql"
-        "php${version}-redis"
-        "php${version}-memcached"
-        "php${version}-zip"
-        "php${version}-xml"
-        "php${version}-soap"
-        "php${version}-gd"
-        "php${version}-imagick"
-        "php${version}-intl"
-    )
-    
-    # Install packages
-    DEBIAN_FRONTEND=noninteractive apt-get install -y "${extensions[@]}" >/dev/null 2>&1
-    
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}Error: Failed to install PHP ${version}${NC}"
-        return 1
-    fi
-    
-    # Configure PHP
-    configure_php "$version"
-    
-    echo -e "${GREEN}PHP ${version} installed successfully!${NC}"
-    return 0
-}
-
-# Configure PHP
-configure_php() {
-    local version=$1
-    local ini_file="/etc/php/${version}/fpm/conf.d/cipi.ini"
-    
-    cat > "$ini_file" <<EOF
+_php_install() {
+    local v="${1:-}"
+    [[ -z "$v" ]] && { error "Usage: cipi php install <8.1|8.2|8.3|8.4>"; exit 1; }
+    validate_php_version "$v" || { error "Invalid: $v"; exit 1; }
+    php_is_installed "$v" && { info "PHP $v already installed"; return; }
+    step "Adding PPA..."
+    add-apt-repository -y ppa:ondrej/php &>/dev/null; apt-get update -qq
+    step "Installing PHP ${v}..."
+    local pkgs=""
+    for e in $_PHP_EXT; do pkgs+=" php${v}-${e}"; done
+    apt-get install -y -qq $pkgs
+    cat > "/etc/php/${v}/fpm/conf.d/99-cipi.ini" <<EOF
 memory_limit = 256M
 upload_max_filesize = 256M
 post_max_size = 256M
 max_execution_time = 300
 max_input_time = 300
+expose_php = Off
 EOF
-    
-    # Restart PHP-FPM
-    systemctl restart "php${version}-fpm" 2>/dev/null
+    [[ -f "/etc/php/${v}/fpm/pool.d/www.conf" ]] && mv "/etc/php/${v}/fpm/pool.d/www.conf" "/etc/php/${v}/fpm/pool.d/www.conf.disabled"
+    systemctl restart "php${v}-fpm"; systemctl enable "php${v}-fpm"
+    log_action "PHP INSTALLED: $v"; success "PHP ${v} installed"
 }
 
-# Create PHP-FPM pool for user
-create_php_pool() {
-    local username=$1
-    local version=$2
-    local pool_file="/etc/php/${version}/fpm/pool.d/${username}.conf"
-    local socket_path="/var/run/php/php${version}-fpm-${username}.sock"
-    local home_dir="/home/${username}"
-    
-    cat > "$pool_file" <<EOF
-[${username}]
-user = ${username}
-group = ${username}
-listen = ${socket_path}
-listen.owner = www-data
-listen.group = www-data
-listen.mode = 0660
-
-pm = dynamic
-pm.max_children = 5
-pm.start_servers = 2
-pm.min_spare_servers = 1
-pm.max_spare_servers = 3
-
-chdir = ${home_dir}/wwwroot
-EOF
-    
-    systemctl restart "php${version}-fpm"
-}
-
-# Delete PHP-FPM pool for user
-delete_php_pool() {
-    local username=$1
-    local version=$2
-    local pool_file="/etc/php/${version}/fpm/pool.d/${username}.conf"
-    
-    if [ -f "$pool_file" ]; then
-        rm -f "$pool_file"
-        systemctl restart "php${version}-fpm" 2>/dev/null
+_php_remove() {
+    local v="${1:-}"
+    [[ -z "$v" ]] && { error "Usage: cipi php remove <ver>"; exit 1; }
+    validate_php_version "$v" || { error "Invalid: $v"; exit 1; }
+    if [[ -f "${CIPI_CONFIG}/apps.json" ]]; then
+        local using; using=$(jq -r --arg v "$v" 'to_entries[]|select(.value.php==$v)|.key' "${CIPI_CONFIG}/apps.json" 2>/dev/null)
+        [[ -n "$using" ]] && { error "In use by: $using"; exit 1; }
     fi
+    confirm "Remove PHP ${v}?" || return
+    systemctl stop "php${v}-fpm" 2>/dev/null; systemctl disable "php${v}-fpm" 2>/dev/null
+    apt-get purge -y "php${v}-*" &>/dev/null; apt-get autoremove -y &>/dev/null
+    log_action "PHP REMOVED: $v"; success "PHP ${v} removed"
 }
 
-# List PHP versions
-php_list() {
-    echo -e "${BOLD}Installed PHP Versions${NC}"
-    echo "─────────────────────────────────────"
-    
-    local versions=($(get_installed_php_versions))
-    local current=$(get_current_php_cli)
-    
-    if [ ${#versions[@]} -eq 0 ]; then
-        echo "No PHP versions found."
-        return
-    fi
-    
-    for version in "${versions[@]}"; do
-        if [ "$version" = "$current" ]; then
-            echo -e "  ${GREEN}●${NC} PHP $version ${CYAN}(CLI default)${NC}"
-        else
-            echo -e "  ${BLUE}○${NC} PHP $version"
+_php_list() {
+    echo -e "\n${BOLD}PHP Versions${NC}"
+    for v in 8.1 8.2 8.3 8.4; do
+        if php_is_installed "$v"; then
+            local st="${RED}stopped" c="${RED}"
+            systemctl is-active --quiet "php${v}-fpm" 2>/dev/null && st="running" && c="${GREEN}"
+            local n=0; [[ -f "${CIPI_CONFIG}/apps.json" ]] && n=$(jq --arg v "$v" '[to_entries[]|select(.value.php==$v)]|length' "${CIPI_CONFIG}/apps.json" 2>/dev/null||echo 0)
+            printf "  PHP %-6s ${c}● %-8s${NC}  %d apps\n" "$v" "$st" "$n"
         fi
-    done
-    
-    echo ""
-    echo -e "${YELLOW}Note:${NC} Use 'cipi virtualhost edit <user> --php=X.X' to change PHP version for a specific virtual host"
-    echo -e "      Use 'cipi php switch X.X' to change the global CLI version"
-    echo ""
+    done; echo ""
 }
-
-# Install PHP version command
-php_install() {
-    local version=""
-    
-    # Parse arguments
-    for arg in "$@"; do
-        case $arg in
-            --version=*|--v=*)
-                version="${arg#*=}"
-                ;;
-            *)
-                if [ -z "$version" ]; then
-                    version="$arg"
-                fi
-                ;;
-        esac
-    done
-    
-    # Validate version
-    if [ -z "$version" ]; then
-        read -p "PHP version to install (e.g., 8.4): " version
-    fi
-    
-    if [ -z "$version" ]; then
-        echo -e "${RED}Error: Version required${NC}"
-        exit 1
-    fi
-    
-    # Check if already installed
-    if is_php_installed "$version"; then
-        echo -e "${YELLOW}PHP $version is already installed${NC}"
-        exit 0
-    fi
-    
-    # Install
-    install_php_version "$version"
-}
-
-# Switch PHP CLI version
-php_switch() {
-    local version=""
-    
-    # Parse arguments
-    for arg in "$@"; do
-        case $arg in
-            --version=*|--v=*)
-                version="${arg#*=}"
-                ;;
-            *)
-                if [ -z "$version" ]; then
-                    version="$arg"
-                fi
-                ;;
-        esac
-    done
-    
-    # Validate version
-    if [ -z "$version" ]; then
-        echo "Select PHP version for CLI:"
-        local versions=($(get_installed_php_versions))
-        local i=1
-        for v in "${versions[@]}"; do
-            echo "  $i. PHP $v"
-            ((i++))
-        done
-        read -p "Choice: " choice
-        version=${versions[$((choice-1))]}
-    fi
-    
-    if [ -z "$version" ]; then
-        echo -e "${RED}Error: Version required${NC}"
-        exit 1
-    fi
-    
-    # Check if installed
-    if ! is_php_installed "$version"; then
-        echo -e "${RED}Error: PHP $version is not installed${NC}"
-        exit 1
-    fi
-    
-    # Switch
-    update-alternatives --set php "/usr/bin/php${version}" >/dev/null 2>&1
-    
-    echo -e "${GREEN}PHP CLI switched to $version${NC}"
-    php -v | head -n 1
-}
-
-# Get current PHP CLI version
-get_current_php_cli() {
-    php -v 2>/dev/null | grep -oP 'PHP \K[0-9]+\.[0-9]+' | head -n 1
-}
-
