@@ -158,10 +158,8 @@ Copy the SSH key and add it as a **Deploy Key**:
 
 - **GitHub:** Repository → Settings → Deploy keys → Add deploy key
 - **GitLab:** Repository → Settings → Repository → Deploy keys
-- **Bitbucket:** Repository → Settings → Access keys
-- **Gitea:** Repository → Settings → Deploy Keys
 
-This works with **any Git provider** that supports SSH keys.
+This works with **GitHub and GitLab**.
 
 ### 3. Add database tables for cache, sessions, and queues
 
@@ -482,7 +480,7 @@ The service provider auto-discovers. No configuration needed — Cipi already se
 
 ### What it provides
 
-**Webhook endpoint** at `/cipi/webhook` — receives push events from GitHub, GitLab, Bitbucket, and Gitea. Verifies HMAC signatures (GitHub/Gitea) or token comparison (GitLab). Writes a `.deploy-trigger` flag file that Cipi's cron picks up to run Deployer.
+**Webhook endpoint** at `/cipi/webhook` — receives push events from GitHub and GitLab. Verifies HMAC signatures (GitHub) or token comparison (GitLab). Writes a `.deploy-trigger` flag file that Cipi's cron picks up to run Deployer.
 
 **Health check** at `/cipi/health` — returns JSON with app, database, cache, and queue status. Useful for monitoring services like UptimeRobot.
 
@@ -497,12 +495,10 @@ php artisan cipi:deploy-key   # show the SSH deploy key
 
 After installing the agent, configure a webhook in your Git provider:
 
-| Provider  | URL                                   | Secret/Token          |
-| --------- | ------------------------------------- | --------------------- |
-| GitHub    | `https://yourdomain.com/cipi/webhook` | Set as "Secret"       |
-| GitLab    | `https://yourdomain.com/cipi/webhook` | Set as "Secret token" |
-| Bitbucket | `https://yourdomain.com/cipi/webhook` | Set as "Secret token" |
-| Gitea     | `https://yourdomain.com/cipi/webhook` | Set as "Secret"       |
+| Provider | URL                                   | Secret/Token          |
+| -------- | ------------------------------------- | --------------------- |
+| GitHub   | `https://yourdomain.com/cipi/webhook` | Set as "Secret"       |
+| GitLab   | `https://yourdomain.com/cipi/webhook` | Set as "Secret token" |
 
 The token is in your `.env` as `CIPI_WEBHOOK_TOKEN` (also visible via `cipi deploy myapp --webhook`).
 
@@ -704,7 +700,7 @@ Cipi v4 uses MariaDB instead of MySQL:
 | Workers     | Basic Supervisor        | CLI-managed with add/edit/remove                      |
 | Cache/Queue | Redis optional          | Database (cache + session + queue)                     |
 | Deploy keys | Shared                  | Per-app (ed25519)                                     |
-| Webhooks    | Not available           | GitHub/GitLab/Bitbucket/Gitea via cipi/agent          |
+| Webhooks    | Not available           | GitHub/GitLab via cipi/agent                           |
 | Auto-update | Reinstall               | `cipi self-update` with migrations                    |
 | Scheduler   | Manual setup            | Automatic for every app                               |
 | PHP         | Multi-version           | Multi-version                                         |

@@ -57,10 +57,16 @@ BASH
     chown -R "${app_user}:${app_user}" "$home"
     success "Directories"
 
-    # 3. SSH deploy key
+    # 3. SSH deploy key (for GitHub) + authorized_keys (for Deployer localhost SSH)
     step "Deploy key..."
     sudo -u "$app_user" ssh-keygen -t ed25519 -C "${app_user}@cipi" -f "${home}/.ssh/id_ed25519" -N "" -q
     local deploy_key; deploy_key=$(cat "${home}/.ssh/id_ed25519.pub")
+    echo "$deploy_key" >> "${home}/.ssh/authorized_keys"
+    chown "${app_user}:${app_user}" "${home}/.ssh/authorized_keys"
+    chmod 600 "${home}/.ssh/authorized_keys"
+    ssh-keyscan -H github.com gitlab.com 2>/dev/null >> "${home}/.ssh/known_hosts"
+    chown "${app_user}:${app_user}" "${home}/.ssh/known_hosts"
+    chmod 600 "${home}/.ssh/known_hosts"
     success "Deploy key"
 
     # 4. MariaDB database

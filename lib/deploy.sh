@@ -74,10 +74,8 @@ _deploy_key() {
     echo -e "\n${BOLD}Deploy Key for '${app}'${NC}"
     echo -e "${CYAN}$(cat "$kf")${NC}\n"
     echo "Add as Deploy Key in:"
-    echo "  GitHub:    Repo → Settings → Deploy keys"
-    echo "  GitLab:    Repo → Settings → Repository → Deploy keys"
-    echo "  Bitbucket: Repo → Settings → Access keys"
-    echo "  Gitea:     Repo → Settings → Deploy Keys"
+    echo "  GitHub: Repo → Settings → Deploy keys"
+    echo "  GitLab: Repo → Settings → Repository → Deploy keys"
     echo ""
 }
 
