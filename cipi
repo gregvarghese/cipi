@@ -118,7 +118,7 @@ show_status() {
     printf "  %-14s ${CYAN}%s${NC}\n" "Disk" "$(df -h / | awk 'NR==2{print $3"/"$2" ("$5")"}')"
 
     echo -e "\n${BOLD}Services${NC}"
-    for svc in nginx mariadb redis-server supervisor fail2ban; do
+    for svc in nginx mariadb supervisor fail2ban; do
         if systemctl is-active --quiet "$svc" 2>/dev/null; then
             printf "  %-16s ${GREEN}● running${NC}\n" "$svc"
         else

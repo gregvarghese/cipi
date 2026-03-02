@@ -65,17 +65,6 @@ app_remove() {
 
 get_db_root_password() { jq -r '.db_root_password' "${CIPI_CONFIG}/server.json"; }
 
-get_next_redis_db() {
-    local used=()
-    [[ -f "${CIPI_CONFIG}/apps.json" ]] && mapfile -t used < <(jq -r '.[].redis_db // empty' "${CIPI_CONFIG}/apps.json")
-    for i in $(seq 1 15); do
-        local found=false
-        for u in "${used[@]:-}"; do [[ "$u" == "$i" ]] && found=true && break; done
-        [[ "$found" == "false" ]] && echo "$i" && return
-    done
-    echo "1"
-}
-
 confirm() {
     echo -e -n "${YELLOW}${1:-Are you sure?} [y/N]: ${NC}"; read -r r; [[ "$r" =~ ^[Yy]$ ]]
 }

@@ -323,24 +323,6 @@ CNFEOF
     echo -e "${GREEN}✓ MariaDB 11.4 (buffer_pool: ${BUFFER_POOL})${NC}"
 }
 
-# ── REDIS ─────────────────────────────────────────────────────
-
-install_redis() {
-    step_msg "Installing Redis..."
-
-    apt-get install -y -qq redis-server
-
-    # Tune
-    sed -i 's/^supervised no/supervised systemd/' /etc/redis/redis.conf 2>/dev/null || true
-    sed -i 's/^# maxmemory .*/maxmemory 256mb/' /etc/redis/redis.conf
-    sed -i 's/^# maxmemory-policy .*/maxmemory-policy allkeys-lru/' /etc/redis/redis.conf
-
-    systemctl restart redis-server
-    systemctl enable redis-server
-
-    echo -e "${GREEN}✓ Redis${NC}"
-}
-
 # ── PHP (multi-version) ──────────────────────────────────────
 
 install_php() {
@@ -349,7 +331,7 @@ install_php() {
     add-apt-repository -y ppa:ondrej/php &>/dev/null
     apt-get update -qq
 
-    local EXTENSIONS="fpm common cli curl bcmath mbstring mysql sqlite3 pgsql redis memcached zip xml soap gd imagick intl"
+    local EXTENSIONS="fpm common cli curl bcmath mbstring mysql sqlite3 pgsql memcached zip xml soap gd imagick intl"
 
     for VER in 8.4 8.5; do
         echo -e "${CYAN}→ PHP ${VER}...${NC}"
@@ -558,7 +540,6 @@ final_summary() {
     echo -e "  Nginx:          ${CYAN}$(nginx -v 2>&1 | awk -F/ '{print $2}')${NC}"
     echo -e "  MariaDB:        ${CYAN}$(mysql --version 2>/dev/null | awk '{print $5}' | tr -d ',')${NC}"
     echo -e "  PHP:            ${CYAN}8.4, 8.5${NC}"
-    echo -e "  Redis:          ${CYAN}$(redis-server --version 2>/dev/null | awk '{print $3}' | tr -d 'v=')${NC}"
     echo -e "  Node.js:        ${CYAN}$(node -v 2>/dev/null)${NC}"
     echo -e "  Composer:       ${CYAN}$(composer --version 2>/dev/null | awk '{print $3}')${NC}"
     echo -e "  Deployer:       ${CYAN}$(dep --version 2>/dev/null | awk '{print $2}')${NC}"
@@ -589,7 +570,6 @@ main() {
     install_nginx
     install_firewall
     install_mariadb
-    install_redis
     install_php
     install_composer
     install_deployer

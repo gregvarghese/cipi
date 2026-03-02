@@ -27,12 +27,11 @@ app_create() {
 
     echo ""; info "Creating '${app_user}'..."; echo ""
 
-    local user_pass db_pass webhook_token app_key redis_db home
+    local user_pass db_pass webhook_token app_key home
     user_pass=$(generate_password 24)
     db_pass=$(generate_password 32)
     webhook_token=$(generate_token)
     app_key=$(generate_app_key)
-    redis_db=$(get_next_redis_db)
     home="/home/${app_user}"
 
     # 1. Linux user
@@ -95,15 +94,9 @@ DB_USERNAME=${app_user}
 DB_PASSWORD=${db_pass}
 
 BROADCAST_CONNECTION=log
-CACHE_STORE=redis
-SESSION_DRIVER=redis
-QUEUE_CONNECTION=redis
-
-REDIS_HOST=127.0.0.1
-REDIS_PASSWORD=null
-REDIS_PORT=6379
-REDIS_DB=${redis_db}
-REDIS_CACHE_DB=${redis_db}
+CACHE_STORE=database
+SESSION_DRIVER=database
+QUEUE_CONNECTION=database
 
 MAIL_MAILER=log
 
@@ -113,7 +106,7 @@ CIPI_PHP_VERSION=${php_ver}
 ENV
     chown "${app_user}:${app_user}" "${home}/shared/.env"
     chmod 640 "${home}/shared/.env"
-    success ".env with DB + Redis + webhook"
+    success ".env with DB + webhook"
 
     # 6. PHP-FPM pool
     step "PHP-FPM pool..."
@@ -137,7 +130,6 @@ ENV
     "repository": "${repository}",
     "branch": "${branch}",
     "php": "${php_ver}",
-    "redis_db": "${redis_db}",
     "webhook_token": "${webhook_token}",
     "created_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 }
@@ -208,13 +200,13 @@ app_list() {
     if [[ ! -f "${CIPI_CONFIG}/apps.json" ]] || [[ $(jq 'length' "${CIPI_CONFIG}/apps.json") -eq 0 ]]; then
         info "No apps. Create one: cipi app create"; return
     fi
-    printf "\n${BOLD}%-14s %-28s %-6s %-8s %s${NC}\n" "APP" "DOMAIN" "PHP" "REDIS" "CREATED"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    jq -r 'to_entries[]|"\(.key)\t\(.value.domain)\t\(.value.php)\t\(.value.redis_db)\t\(.value.created_at)"' \
-        "${CIPI_CONFIG}/apps.json" | while IFS=$'\t' read -r a d p r c; do
+    printf "\n${BOLD}%-14s %-28s %-6s %s${NC}\n" "APP" "DOMAIN" "PHP" "CREATED"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    jq -r 'to_entries[]|"\(.key)\t\(.value.domain)\t\(.value.php)\t\(.value.created_at)"' \
+        "${CIPI_CONFIG}/apps.json" | while IFS=$'\t' read -r a d p c; do
         local st="${GREEN}●${NC}"
         systemctl is-active --quiet "php${p}-fpm" 2>/dev/null || st="${RED}●${NC}"
-        printf "  ${st} %-12s %-28s %-6s %-8s %s\n" "$a" "$d" "$p" "$r" "${c:0:10}"
+        printf "  ${st} %-12s %-28s %-6s %s\n" "$a" "$d" "$p" "${c:0:10}"
     done; echo ""
 }
 
@@ -224,9 +216,9 @@ app_show() {
     local app="${1:-}"; [[ -z "$app" ]] && { error "Usage: cipi app show <app>"; exit 1; }
     app_exists "$app" || { error "App '$app' not found"; exit 1; }
 
-    local d p b repo rdb wt ca aliases
+    local d p b repo wt ca aliases
     d=$(app_get "$app" domain); p=$(app_get "$app" php); b=$(app_get "$app" branch)
-    repo=$(app_get "$app" repository); rdb=$(app_get "$app" redis_db)
+    repo=$(app_get "$app" repository)
     wt=$(app_get "$app" webhook_token); ca=$(app_get "$app" created_at)
     aliases=$(jq -r --arg a "$app" '.[$a].aliases//[]|join(", ")' "${CIPI_CONFIG}/apps.json")
     [[ -z "$aliases" ]] && aliases="none"
@@ -238,7 +230,6 @@ app_show() {
     printf "  %-14s ${CYAN}%s${NC}\n" "Repository" "$repo"
     printf "  %-14s ${CYAN}%s${NC}\n" "Branch" "$b"
     printf "  %-14s ${CYAN}%s${NC}\n" "PHP" "$p"
-    printf "  %-14s ${CYAN}%s${NC}\n" "Redis DB" "$rdb"
     printf "  %-14s ${CYAN}%s${NC}\n" "Created" "$ca"
     echo -e "\n  ${BOLD}Webhook${NC}  ${CYAN}https://${d}/cipi/webhook${NC}"
 
@@ -468,7 +459,7 @@ _create_supervisor_worker() {
     cat >> "/etc/supervisor/conf.d/${app}.conf" <<EOF
 [program:${app}-worker-${queue}]
 process_name=%(program_name)s_%(process_num)02d
-command=/usr/bin/php${v} /home/${app}/current/artisan queue:work redis --sleep=3 --tries=${tries} --max-time=${timeout} --queue=${queue}
+command=/usr/bin/php${v} /home/${app}/current/artisan queue:work database --sleep=3 --tries=${tries} --max-time=${timeout} --queue=${queue}
 autostart=true
 autorestart=true
 stopasgroup=true
@@ -483,20 +474,21 @@ EOF
 }
 
 _create_deployer_config() {
-    local app_name="$1" repo="$2" branch="$3" v="$4" deploy_home="/home/${app_name}"
-    cat > "${deploy_home}/.deployer/deploy.php" <<'PHPTOP'
+    local an="$1" repo="$2" branch="$3" v="$4"
+    local dh="/home/${an}"
+    cat > "${dh}/.deployer/deploy.php" <<'PHPTOP'
 <?php
 namespace Deployer;
 require 'recipe/laravel.php';
 
 PHPTOP
-    cat >> "${deploy_home}/.deployer/deploy.php" <<PHP
-set('application', '${app_name}');
+    cat >> "${dh}/.deployer/deploy.php" <<PHP
+set('application', '${an}');
 set('repository', '${repo}');
 set('branch', '${branch}');
-set('deploy_path', '${deploy_home}');
+set('deploy_path', '${dh}');
 set('keep_releases', 5);
-set('git_ssh_command', 'ssh -i ${deploy_home}/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new');
+set('git_ssh_command', 'ssh -i ${dh}/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new');
 set('bin/php', '/usr/bin/php${v}');
 set('writable_mode', 'chmod');
 
@@ -509,18 +501,18 @@ add('writable_dirs', [
 ]);
 
 host('localhost')
-    ->set('remote_user', '${app_name}')
-    ->set('deploy_path', '${deploy_home}');
+    ->set('remote_user', '${an}')
+    ->set('deploy_path', '${dh}');
 
 after('deploy:vendors', 'artisan:storage:link');
 after('deploy:vendors', 'artisan:optimize');
 after('deploy:symlink', 'workers:restart');
 
 task('workers:restart', function () {
-    run('sudo /usr/local/bin/cipi-worker restart ${app_name}');
+    run('sudo /usr/local/bin/cipi-worker restart ${an}');
 });
 PHP
-    chown -R "${app_name}:${app_name}" "${deploy_home}/.deployer"
+    chown -R "${an}:${an}" "${dh}/.deployer"
 }
 
 # ── ROUTERS ───────────────────────────────────────────────────

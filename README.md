@@ -25,7 +25,7 @@
 <strong>Easy Laravel Deployments</strong><br>
 The open-source deploy CLI exclusively for Laravel.
 
-One command installs a complete production stack. One command creates an isolated Laravel app with its own database, Redis, queue workers, SSL, and zero-downtime deploys. No web panel, no bloat — just SSH and `cipi`.
+One command installs a complete production stack. One command creates an isolated Laravel app with its own database, queue workers, SSL, and zero-downtime deploys. No web panel, no bloat — just SSH and `cipi`.
 
 ```bash
 wget -O - https://raw.githubusercontent.com/andreapollastri/cipi/refs/heads/latest/install.sh | bash
@@ -40,7 +40,7 @@ A single VPS becomes a multi-app Laravel hosting platform:
 - **Nginx** reverse proxy with per-app virtual hosts
 - **MariaDB 11.4** auto-tuned to your server's RAM
 - **PHP 8.4 / 8.5** — all installed, selectable per app
-- **Redis** for cache, sessions, and queues
+- **Database** for cache, sessions, and queues (as Laravel recommends)
 - **Supervisor** managing queue workers per app
 - **Deployer 7** for zero-downtime deployments
 - **Let's Encrypt** automatic SSL via Certbot
@@ -163,7 +163,18 @@ Copy the SSH key and add it as a **Deploy Key**:
 
 This works with **any Git provider** that supports SSH keys.
 
-### 3. Deploy
+### 3. Add database tables for cache, sessions, and queues
+
+Cipi uses the database for cache, sessions, and queues. In your Laravel project, run once:
+
+```bash
+php artisan cache:table && php artisan session:table && php artisan queue:table
+php artisan migrate
+```
+
+Commit and push the generated migrations. The deploy will run them automatically.
+
+### 4. Deploy
 
 ```bash
 cipi deploy myapp
@@ -171,7 +182,7 @@ cipi deploy myapp
 
 Deployer clones your repo, runs `composer install`, links storage, runs migrations, and swaps the `current` symlink — zero downtime.
 
-### 4. Install SSL
+### 5. Install SSL
 
 ```bash
 cipi ssl install myapp
@@ -214,10 +225,10 @@ Nginx vhost:     /etc/nginx/sites-available/myapp
 Supervisor:      /etc/supervisor/conf.d/myapp.conf
 Crontab:         * * * * * php artisan schedule:run
 MariaDB:         database 'myapp', user 'myapp'@'localhost'
-Redis:           database number 1 (isolated per app)
+Cache/Session/Queue: database (tables: cache, sessions, jobs)
 ```
 
-The `.env` is **auto-compiled** with all credentials — database, Redis, webhook token, app key. You don't have to configure anything manually.
+The `.env` is **auto-compiled** with all credentials — database, webhook token, app key. Cache, sessions, and queues use the main database (as Laravel recommends). You don't have to configure anything manually.
 
 ---
 
@@ -421,7 +432,7 @@ Cipi installs UFW with ports 22, 80, and 443 open by default. Manage additional 
 
 ```bash
 cipi firewall allow 3306 --from=10.0.0.5    # MySQL access from specific IP
-cipi firewall allow 6379 --from=10.0.0.0/24  # Redis from subnet
+cipi firewall allow 3306 --from=10.0.0.0/24  # MariaDB from subnet
 cipi firewall deny 8080                       # block a port
 cipi firewall list                            # show all rules
 ```
@@ -473,7 +484,7 @@ The service provider auto-discovers. No configuration needed — Cipi already se
 
 **Webhook endpoint** at `/cipi/webhook` — receives push events from GitHub, GitLab, Bitbucket, and Gitea. Verifies HMAC signatures (GitHub/Gitea) or token comparison (GitLab). Writes a `.deploy-trigger` flag file that Cipi's cron picks up to run Deployer.
 
-**Health check** at `/cipi/health` — returns JSON with app, database, Redis, cache, and queue status. Useful for monitoring services like UptimeRobot.
+**Health check** at `/cipi/health` — returns JSON with app, database, cache, and queue status. Useful for monitoring services like UptimeRobot.
 
 **Artisan commands:**
 
@@ -519,7 +530,6 @@ curl -H "Authorization: Bearer YOUR_TOKEN" https://yourdomain.com/cipi/health
   "laravel": "12.0.0",
   "checks": {
     "database": { "ok": true },
-    "redis": { "ok": true },
     "cache": { "ok": true },
     "queue": { "ok": true, "pending_jobs": 0 }
   }
@@ -572,7 +582,7 @@ Cipi takes security seriously:
 - **User isolation** — each app runs under its own Linux user with `chmod 750` on the home directory. Apps cannot read each other's files.
 - **PHP-FPM isolation** — each app has its own FPM pool running as the app user with its own socket. `open_basedir` restricts PHP to the app's home directory.
 - **Database isolation** — each app has its own MariaDB user with `GRANT ALL` only on its own database.
-- **Redis isolation** — each app uses a separate Redis database number (0–15).
+- **Database isolation** — cache, sessions, and queues use the app's MariaDB database (no Redis required).
 - **SSH keys per app** — each app gets its own ed25519 deploy key. A compromised key only affects one repository.
 - **Fail2ban** — brute-force protection on SSH with automatic IP banning.
 - **UFW firewall** — only ports 22, 80, and 443 are open by default.
@@ -692,13 +702,13 @@ Cipi v4 uses MariaDB instead of MySQL:
 | Database    | MySQL                   | MariaDB 11.4                                          |
 | Deploy      | `git pull`              | Deployer (zero-downtime)                              |
 | Workers     | Basic Supervisor        | CLI-managed with add/edit/remove                      |
-| Cache/Queue | Redis optional          | Redis required (cache + session + queue)              |
+| Cache/Queue | Redis optional          | Database (cache + session + queue)                     |
 | Deploy keys | Shared                  | Per-app (ed25519)                                     |
 | Webhooks    | Not available           | GitHub/GitLab/Bitbucket/Gitea via cipi/agent          |
 | Auto-update | Reinstall               | `cipi self-update` with migrations                    |
 | Scheduler   | Manual setup            | Automatic for every app                               |
 | PHP         | Multi-version           | Multi-version                                         |
-| Isolation   | Separate users          | Users + FPM pools + open_basedir + separate Redis DBs |
+| Isolation   | Separate users          | Users + FPM pools + open_basedir + per-app database   |
 | SSL         | Let's Encrypt           | Let's Encrypt with SAN for aliases                    |
 | Backup      | Not available           | S3 automated                                          |
 

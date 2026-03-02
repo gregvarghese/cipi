@@ -3,7 +3,7 @@
 # Cipi — PHP Version Management
 #############################################
 
-readonly _PHP_EXT="fpm common cli curl bcmath mbstring mysql sqlite3 pgsql redis memcached zip xml soap gd imagick intl"
+readonly _PHP_EXT="fpm common cli curl bcmath mbstring mysql sqlite3 pgsql memcached zip xml soap gd imagick intl"
 
 php_command() {
     local sub="${1:-}"; shift||true
