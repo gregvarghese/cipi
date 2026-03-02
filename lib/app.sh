@@ -75,7 +75,9 @@ BASH
     mariadb -u root -p"${db_root}" <<SQL
 CREATE DATABASE IF NOT EXISTS \`${app_user}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${app_user}'@'localhost' IDENTIFIED BY '${db_pass}';
+CREATE USER IF NOT EXISTS '${app_user}'@'127.0.0.1' IDENTIFIED BY '${db_pass}';
 GRANT ALL PRIVILEGES ON \`${app_user}\`.* TO '${app_user}'@'localhost';
+GRANT ALL PRIVILEGES ON \`${app_user}\`.* TO '${app_user}'@'127.0.0.1';
 FLUSH PRIVILEGES;
 SQL
     success "Database"
