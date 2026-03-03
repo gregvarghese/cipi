@@ -13,7 +13,21 @@ backup_command() {
     esac
 }
 
+_ensure_awscli() {
+    if ! command -v aws &>/dev/null; then
+        step "Installing AWS CLI v2..."
+        local tmp; tmp=$(mktemp -d)
+        curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "${tmp}/awscliv2.zip"
+        unzip -q "${tmp}/awscliv2.zip" -d "${tmp}"
+        "${tmp}/aws/install" --update -i /usr/local/aws-cli -b /usr/local/bin &>/dev/null
+        rm -rf "${tmp}"
+        command -v aws &>/dev/null || { error "AWS CLI install failed"; exit 1; }
+        success "AWS CLI $(aws --version 2>&1 | awk '{print $1}')"
+    fi
+}
+
 _bk_configure() {
+    _ensure_awscli
     local cf="${CIPI_CONFIG}/backup.json"
     local ck="" cs="" cb="" cr=""
     [[ -f "$cf" ]] && { ck=$(jq -r '.aws_key//"" ' "$cf"); cs=$(jq -r '.aws_secret//""' "$cf"); cb=$(jq -r '.bucket//""' "$cf"); cr=$(jq -r '.region//""' "$cf"); }
@@ -25,13 +39,32 @@ _bk_configure() {
 {"aws_key":"${ck}","aws_secret":"${cs}","bucket":"${cb}","region":"${cr}"}
 EOF
     chmod 600 "$cf"
-    aws configure set aws_access_key_id "$ck"
-    aws configure set aws_secret_access_key "$cs"
-    aws configure set default.region "$cr"
-    success "Backup configured"
+    mkdir -p /root/.aws
+    cat > /root/.aws/credentials <<AWSCREDS
+[default]
+aws_access_key_id = ${ck}
+aws_secret_access_key = ${cs}
+AWSCREDS
+    cat > /root/.aws/config <<AWSCFG
+[default]
+region = ${cr}
+output = json
+AWSCFG
+    chmod 600 /root/.aws/credentials /root/.aws/config
+
+    step "Testing S3 connectivity..."
+    local test_err
+    test_err=$(aws s3 ls "s3://${cb}" 2>&1)
+    if [[ $? -ne 0 ]]; then
+        error "S3 connection failed:"
+        echo "$test_err" | sed 's/^/  /'
+        exit 1
+    fi
+    success "Backup configured (S3 connection OK)"
 }
 
 _bk_run() {
+    _ensure_awscli
     local target="${1:-}" cf="${CIPI_CONFIG}/backup.json"
     [[ ! -f "$cf" ]] && { error "Run: cipi backup configure"; exit 1; }
     local bucket; bucket=$(jq -r '.bucket' "$cf")
@@ -41,11 +74,31 @@ _bk_run() {
 
     _do_backup() {
         local app="$1"; local d="${tmp}/${app}"; mkdir -p "$d"
+        local ok=true
         step "Backup '${app}'..."
-        mysqldump -u root -p"$dbr" --single-transaction "$app" 2>/dev/null | gzip >"${d}/db.sql.gz"
-        tar -czf "${d}/shared.tar.gz" -C "/home/${app}" shared/ 2>/dev/null
-        aws s3 cp "${d}/" "s3://${bucket}/cipi/${app}/${ts}/" --recursive --quiet 2>/dev/null
-        [[ $? -eq 0 ]] && success "  → s3://${bucket}/cipi/${app}/${ts}/" || error "  Upload failed"
+
+        mysqldump -u root -p"$dbr" --single-transaction "$app" 2>"${d}/db.err" | gzip >"${d}/db.sql.gz"
+        if [[ ${PIPESTATUS[0]} -ne 0 ]] || [[ -s "${d}/db.err" ]]; then
+            error "  DB dump failed:"; sed 's/^/    /' "${d}/db.err"; ok=false
+        fi
+        rm -f "${d}/db.err"
+
+        local tar_err
+        tar_err=$(tar -czf "${d}/shared.tar.gz" -C "/home/${app}" shared/ 2>&1) || {
+            error "  Files archive failed: ${tar_err}"; ok=false
+        }
+
+        local s3_err
+        s3_err=$(aws s3 cp "${d}/" "s3://${bucket}/cipi/${app}/${ts}/" --recursive 2>&1)
+        if [[ $? -ne 0 ]]; then
+            error "  S3 upload failed:"
+            echo "$s3_err" | sed 's/^/    /'
+            ok=false
+        else
+            success "  → s3://${bucket}/cipi/${app}/${ts}/"
+        fi
+
+        [[ "$ok" == false ]] && warn "  Backup '${app}' completed with errors"
     }
 
     if [[ -n "$target" ]]; then
@@ -54,15 +107,23 @@ _bk_run() {
     else
         jq -r 'keys[]' "${CIPI_CONFIG}/apps.json" 2>/dev/null | while read -r a; do _do_backup "$a"; done
     fi
-    rm -rf "$tmp"; success "Backup complete"
+    rm -rf "$tmp"
+    success "Backup complete"
 }
 
 _bk_list() {
+    _ensure_awscli
     local target="${1:-}" cf="${CIPI_CONFIG}/backup.json"
     [[ ! -f "$cf" ]] && { error "Run: cipi backup configure"; exit 1; }
     local bucket; bucket=$(jq -r '.bucket' "$cf")
     echo -e "\n${BOLD}Backups${NC}"
-    if [[ -n "$target" ]]; then aws s3 ls "s3://${bucket}/cipi/${target}/" 2>/dev/null|sed 's/^/  /'
-    else aws s3 ls "s3://${bucket}/cipi/" 2>/dev/null|sed 's/^/  /'; fi
+    local ls_err
+    if [[ -n "$target" ]]; then
+        ls_err=$(aws s3 ls "s3://${bucket}/cipi/${target}/" 2>&1) || { error "$ls_err"; exit 1; }
+        echo "$ls_err" | sed 's/^/  /'
+    else
+        ls_err=$(aws s3 ls "s3://${bucket}/cipi/" 2>&1) || { error "$ls_err"; exit 1; }
+        echo "$ls_err" | sed 's/^/  /'
+    fi
     echo ""
 }

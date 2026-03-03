@@ -1,6 +1,9 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/andreapollastri/cipi/latest/logo.png" width="240" alt="Cipi">
-</p>
+## Cipi
+
+<strong>Easy Laravel Deployments</strong><br>
+The open-source deploy CLI exclusively for Laravel.
+
+One command installs a complete production stack. One command creates an isolated Laravel app with its own database, queue workers, SSL, and zero-downtime deploys. No web panel, no bloat — just SSH and `cipi`.
 
 <p align="center">
   <a href="#install">Install</a> •
@@ -17,19 +20,6 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/github/stars/andreapollastri/cipi?style=social" alt="Stars">
 </p>
-
----
-
-## Cipi
-
-<strong>Easy Laravel Deployments</strong><br>
-The open-source deploy CLI exclusively for Laravel.
-
-One command installs a complete production stack. One command creates an isolated Laravel app with its own database, queue workers, SSL, and zero-downtime deploys. No web panel, no bloat — just SSH and `cipi`.
-
-```bash
-wget -O - https://raw.githubusercontent.com/andreapollastri/cipi/refs/heads/latest/install.sh | bash
-```
 
 ---
 
@@ -691,22 +681,22 @@ Cipi v4 uses MariaDB instead of MySQL:
 
 ## Differences from Cipi v3
 
-|             | v3                      | v4                                                    |
-| ----------- | ----------------------- | ----------------------------------------------------- |
-| Interface   | Web UI (Laravel app)    | CLI only (SSH)                                        |
-| Target      | Generic PHP + WordPress | Laravel exclusively                                   |
-| Database    | MySQL                   | MariaDB 11.4                                          |
-| Deploy      | `git pull`              | Deployer (zero-downtime)                              |
-| Workers     | Basic Supervisor        | CLI-managed with add/edit/remove                      |
-| Cache/Queue | Redis optional          | Database (cache + session + queue)                     |
-| Deploy keys | Shared                  | Per-app (ed25519)                                     |
-| Webhooks    | Not available           | GitHub/GitLab via cipi/agent                           |
-| Auto-update | Reinstall               | `cipi self-update` with migrations                    |
-| Scheduler   | Manual setup            | Automatic for every app                               |
-| PHP         | Multi-version           | Multi-version                                         |
-| Isolation   | Separate users          | Users + FPM pools + open_basedir + per-app database   |
-| SSL         | Let's Encrypt           | Let's Encrypt with SAN for aliases                    |
-| Backup      | Not available           | S3 automated                                          |
+|             | v3                      | v4                                                  |
+| ----------- | ----------------------- | --------------------------------------------------- |
+| Interface   | Web UI (Laravel app)    | CLI only (SSH)                                      |
+| Target      | Generic PHP + WordPress | Laravel exclusively                                 |
+| Database    | MySQL                   | MariaDB 11.4                                        |
+| Deploy      | `git pull`              | Deployer (zero-downtime)                            |
+| Workers     | Basic Supervisor        | CLI-managed with add/edit/remove                    |
+| Cache/Queue | Redis optional          | Database (cache + session + queue)                  |
+| Deploy keys | Shared                  | Per-app (ed25519)                                   |
+| Webhooks    | Not available           | GitHub/GitLab via cipi/agent                        |
+| Auto-update | Reinstall               | `cipi self-update` with migrations                  |
+| Scheduler   | Manual setup            | Automatic for every app                             |
+| PHP         | Multi-version           | Multi-version                                       |
+| Isolation   | Separate users          | Users + FPM pools + open_basedir + per-app database |
+| SSL         | Let's Encrypt           | Let's Encrypt with SAN for aliases                  |
+| Backup      | Not available           | S3 automated                                        |
 
 ---
 

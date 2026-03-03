@@ -39,10 +39,12 @@ _ssl_install() {
     done <<< "${aliases:-}"
 
     echo ""
-    step "Installing SSL for ${d}..."
+    step "Installing SSL for ${d}$([ -n "${aliases}" ] && echo " + aliases")..."
     echo ""
 
     if certbot --nginx $domains \
+        --cert-name "${d}" \
+        --expand \
         --non-interactive \
         --agree-tos \
         --register-unsafely-without-email \
