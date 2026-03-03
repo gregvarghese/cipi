@@ -422,13 +422,17 @@ EOF
 _create_nginx_vhost() {
     local app="$1" domain="$2" v="$3"
     local names="$domain"
-    local aliases
+    local aliases_raw aliases_flat
     if [[ $# -ge 4 ]]; then
-        aliases="${4:-}"
+        aliases_raw="${4:-}"
     else
-        aliases=$(jq -r --arg a "$app" '.[$a].aliases // [] | .[]' "${CIPI_CONFIG}/apps.json" 2>/dev/null || true)
+        aliases_raw=$(jq -r --arg a "$app" '.[$a].aliases // [] | .[]' "${CIPI_CONFIG}/apps.json" 2>/dev/null || true)
     fi
-    [[ -n "$aliases" ]] && names="$domain $aliases"
+    if [[ -n "$aliases_raw" ]]; then
+        # Collapse newlines to spaces: nginx server_name must be single-line for certbot to parse correctly
+        aliases_flat=$(echo "$aliases_raw" | tr '\n' ' ' | sed 's/ $//')
+        names="$domain $aliases_flat"
+    fi
     cat > "/etc/nginx/sites-available/${app}" <<EOF
 server {
     listen 80;
