@@ -679,6 +679,10 @@ final_summary() {
 # ── MAIN ──────────────────────────────────────────────────────
 
 main() {
+    # Fetch version early for logo display
+    BUILD=$(curl -fsSL "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/version.md" 2>/dev/null | tr -d '[:space:]')
+    [[ -z "$BUILD" ]] && BUILD="?"
+
     show_logo
     check_requirements
     install_basics
