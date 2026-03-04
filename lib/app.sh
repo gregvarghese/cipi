@@ -510,6 +510,79 @@ PHP
     chown -R "${an}:${an}" "${dh}/.deployer"
 }
 
+# ── AUTH ──────────────────────────────────────────────────────
+
+auth_create() {
+    local app="${1:-}"; [[ -z "$app" ]] && { error "Usage: cipi auth create <app>"; exit 1; }
+    app_exists "$app" || { error "App '$app' not found"; exit 1; }
+    local auth_file="/home/${app}/shared/auth.json"
+    if [[ -f "$auth_file" ]]; then
+        warn "auth.json already exists for '${app}'"
+        confirm "Overwrite?" || { info "Cancelled"; return; }
+    fi
+    cat > "$auth_file" <<JSON
+{
+    "users": []
+}
+JSON
+    chown "${app}:${app}" "$auth_file"
+    chmod 640 "$auth_file"
+
+    if grep -q "shared_files" "/home/${app}/.deployer/deploy.php" 2>/dev/null; then
+        if ! grep -q "auth.json" "/home/${app}/.deployer/deploy.php" 2>/dev/null; then
+            sed -i "s|add('shared_files', \['.env'\]);|add('shared_files', ['.env', 'auth.json']);|" "/home/${app}/.deployer/deploy.php"
+            info "auth.json added to Deployer shared_files"
+        fi
+    fi
+
+    log_action "AUTH CREATED: $app"
+    success "auth.json created at ${auth_file}"
+    info "Edit it with: cipi auth edit ${app}"
+}
+
+auth_edit() {
+    local app="${1:-}"; [[ -z "$app" ]] && { error "Usage: cipi auth edit <app>"; exit 1; }
+    app_exists "$app" || { error "App '$app' not found"; exit 1; }
+    local auth_file="/home/${app}/shared/auth.json"
+    [[ ! -f "$auth_file" ]] && { error "auth.json not found. Run: cipi auth create ${app}"; exit 1; }
+    ${EDITOR:-nano} "$auth_file"
+    if jq empty "$auth_file" 2>/dev/null; then
+        chown "${app}:${app}" "$auth_file"; chmod 640 "$auth_file"
+        log_action "AUTH EDITED: $app"
+        success "auth.json updated"
+    else
+        error "Invalid JSON — file saved but may be malformed. Fix it manually: ${auth_file}"
+    fi
+}
+
+auth_show() {
+    local app="${1:-}"; [[ -z "$app" ]] && { error "Usage: cipi auth show <app>"; exit 1; }
+    app_exists "$app" || { error "App '$app' not found"; exit 1; }
+    local auth_file="/home/${app}/shared/auth.json"
+    [[ ! -f "$auth_file" ]] && { error "auth.json not found. Run: cipi auth create ${app}"; exit 1; }
+    echo -e "\n${BOLD}auth.json — ${app}${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    jq . "$auth_file" 2>/dev/null || cat "$auth_file"
+    echo ""
+}
+
+auth_delete() {
+    local app="${1:-}"; [[ -z "$app" ]] && { error "Usage: cipi auth delete <app>"; exit 1; }
+    app_exists "$app" || { error "App '$app' not found"; exit 1; }
+    local auth_file="/home/${app}/shared/auth.json"
+    [[ ! -f "$auth_file" ]] && { error "auth.json not found for '${app}'"; exit 1; }
+    confirm "Delete auth.json for '${app}'?" || { info "Cancelled"; return; }
+    rm -f "$auth_file"
+
+    if grep -q "auth.json" "/home/${app}/.deployer/deploy.php" 2>/dev/null; then
+        sed -i "s|add('shared_files', \['.env', 'auth.json'\]);|add('shared_files', ['.env']);|" "/home/${app}/.deployer/deploy.php"
+        info "auth.json removed from Deployer shared_files"
+    fi
+
+    log_action "AUTH DELETED: $app"
+    success "auth.json deleted for '${app}'"
+}
+
 # ── ROUTERS ───────────────────────────────────────────────────
 
 app_command() {
@@ -535,5 +608,16 @@ alias_command() {
         remove) alias_remove "$@" ;;
         list)   alias_list "$@" ;;
         *) error "Unknown: $sub"; echo "Use: add remove list"; exit 1 ;;
+    esac
+}
+
+auth_command() {
+    local sub="${1:-}"; shift||true
+    case "$sub" in
+        create) auth_create "$@" ;;
+        edit)   auth_edit "$@" ;;
+        show)   auth_show "$@" ;;
+        delete) auth_delete "$@" ;;
+        *) error "Unknown: $sub"; echo "Use: create edit show delete"; exit 1 ;;
     esac
 }
