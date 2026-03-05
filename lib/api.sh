@@ -104,7 +104,11 @@ _api_ensure_laravel_app() {
         # 5. Ensure User model has HasApiTokens trait
         _api_patch_user_model /tmp/cipi-api-build
 
-        # 6. Move to final location
+        # 6. Replace default / route with cipi welcome
+        [[ -f /tmp/cipi-api-build/routes/web.php ]] && \
+            sed -i "s/view('welcome')/view('cipi::welcome')/g" /tmp/cipi-api-build/routes/web.php
+
+        # 7. Move to final location
         rm -rf "${CIPI_API_ROOT}" 2>/dev/null
         mv /tmp/cipi-api-build "${CIPI_API_ROOT}"
         chown -R www-data:www-data "${CIPI_API_ROOT}"
@@ -334,6 +338,8 @@ api_upgrade() {
     (cd /tmp/cipi-api-build && php artisan vendor:publish --tag=cipi-assets --force 2>/dev/null) || true
     (cd /tmp/cipi-api-build && php artisan migrate --force 2>/dev/null) || true
     (cd /tmp/cipi-api-build && php artisan cipi:seed-user 2>/dev/null) || true
+    [[ -f /tmp/cipi-api-build/routes/web.php ]] && \
+        sed -i "s/view('welcome')/view('cipi::welcome')/g" /tmp/cipi-api-build/routes/web.php
     success "Migrations & assets"
 
     # 7. Swap in the new build
