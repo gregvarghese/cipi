@@ -4,6 +4,21 @@ All notable changes to Cipi are documented in this file.
 
 ---
 
+## [4.0.4] — 2026-03-05
+
+### Added
+
+- Redis in the default stack — installed with password, bind to localhost only
+- `cipi service` now includes `redis-server` (list, restart, start, stop)
+- Redis credentials (user, password) saved in `/etc/cipi/server.json` and shown at end of installation
+- Migration 4.0.4 for existing servers: installs Redis and adds `redis-server` to unattended-upgrades blacklist
+
+### Changed
+
+- Redis added to unattended-upgrades package blacklist (managed by Cipi, no auto-upgrade)
+
+---
+
 ## [4.0.3] — 2026-03-05
 
 ### Fixed
