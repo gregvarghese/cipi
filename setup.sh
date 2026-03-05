@@ -401,6 +401,46 @@ CNFEOF
     echo -e "${GREEN}✓ MariaDB 11.4 (buffer_pool: ${BUFFER_POOL})${NC}"
 }
 
+# ── REDIS ───────────────────────────────────────────────────
+
+install_redis() {
+    step_msg "Installing Redis..."
+
+    apt-get install -y -qq redis-server
+
+    # Generate password
+    local REDIS_PASS
+    REDIS_PASS=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c 32)
+
+    # Configure requirepass and bind to localhost
+    if grep -q "^# *requirepass" /etc/redis/redis.conf; then
+        sed -i "s/^# *requirepass.*/requirepass ${REDIS_PASS}/" /etc/redis/redis.conf
+    elif grep -q "^requirepass" /etc/redis/redis.conf; then
+        sed -i "s/^requirepass.*/requirepass ${REDIS_PASS}/" /etc/redis/redis.conf
+    else
+        echo "requirepass ${REDIS_PASS}" >> /etc/redis/redis.conf
+    fi
+
+    # Ensure bind to localhost only
+    if grep -q "^bind " /etc/redis/redis.conf; then
+        sed -i "s/^bind .*/bind 127.0.0.1 -::1/" /etc/redis/redis.conf
+    elif ! grep -q "^bind " /etc/redis/redis.conf; then
+        echo "bind 127.0.0.1 -::1" >> /etc/redis/redis.conf
+    fi
+
+    systemctl restart redis-server
+    systemctl enable redis-server
+
+    # Save Redis credentials in server.json (merge with existing)
+    local tmp
+    tmp=$(mktemp)
+    jq --arg u "default" --arg p "$REDIS_PASS" '. + {redis_user: $u, redis_password: $p}' /etc/cipi/server.json > "$tmp"
+    mv "$tmp" /etc/cipi/server.json
+    chmod 600 /etc/cipi/server.json
+
+    echo -e "${GREEN}✓ Redis $(redis-server --version 2>/dev/null | awk '{print $3}' || echo "")${NC}"
+}
+
 # ── PHP (multi-version) ──────────────────────────────────────
 
 install_php() {
@@ -565,7 +605,7 @@ setup_cron() {
     mkdir -p /var/log/cipi
 
     # Configure unattended-upgrades: security patches only,
-    # never auto-upgrade nginx / mariadb / php (managed by cipi)
+    # never auto-upgrade nginx / mariadb / redis / php (managed by cipi)
     cat > /etc/apt/apt.conf.d/50cipi-unattended-upgrades <<'UUEOF'
 Unattended-Upgrade::Allowed-Origins {
     "${distro_id}:${distro_codename}-security";
@@ -580,6 +620,7 @@ Unattended-Upgrade::Package-Blacklist {
     "mariadb-server";
     "mariadb-client";
     "mariadb-common";
+    "redis-server";
     "php.*";
     "libphp.*";
 };
@@ -643,6 +684,9 @@ final_summary() {
     SERVER_IP=$(curl -s --max-time 5 https://checkip.amazonaws.com 2>/dev/null || echo "N/A")
     local DB_ROOT_PASS
     DB_ROOT_PASS=$(jq -r '.db_root_password' /etc/cipi/server.json)
+    local REDIS_USER REDIS_PASS
+    REDIS_USER=$(jq -r '.redis_user // "default"' /etc/cipi/server.json)
+    REDIS_PASS=$(jq -r '.redis_password // ""' /etc/cipi/server.json)
 
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -656,6 +700,7 @@ final_summary() {
     echo -e "  ${BOLD}Stack${NC}"
     echo -e "  Nginx:          ${CYAN}$(nginx -v 2>&1 | awk -F/ '{print $2}')${NC}"
     echo -e "  MariaDB:        ${CYAN}$(mysql --version 2>/dev/null | awk '{print $5}' | tr -d ',')${NC}"
+    echo -e "  Redis:          ${CYAN}$(redis-server --version 2>/dev/null | awk '{print $3}' || echo "N/A")${NC}"
     echo -e "  PHP:            ${CYAN}8.4, 8.5${NC}"
     echo -e "  Node.js:        ${CYAN}$(node -v 2>/dev/null)${NC}"
     echo -e "  Composer:       ${CYAN}$(composer --version 2>/dev/null | awk '{print $3}')${NC}"
@@ -665,7 +710,13 @@ final_summary() {
     echo -e "  User:           ${CYAN}root${NC}"
     echo -e "  Password:       ${CYAN}${DB_ROOT_PASS}${NC}"
     echo ""
-    echo -e "  ${YELLOW}${BOLD}⚠ SAVE THIS PASSWORD!${NC}"
+    if [[ -n "$REDIS_PASS" ]]; then
+    echo -e "  ${BOLD}Redis${NC}"
+    echo -e "  User:           ${CYAN}${REDIS_USER}${NC}"
+    echo -e "  Password:       ${CYAN}${REDIS_PASS}${NC}"
+    echo ""
+    fi
+    echo -e "  ${YELLOW}${BOLD}⚠ SAVE THESE PASSWORDS!${NC}"
     echo ""
     echo -e "  ${BOLD}Getting Started${NC}"
     echo -e "  Server status:  ${CYAN}cipi status${NC}"
@@ -696,6 +747,7 @@ main() {
     install_deployer
     install_nodejs
     install_supervisor
+    install_redis
     install_certbot
     install_cipi
     setup_cron
