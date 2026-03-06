@@ -56,14 +56,22 @@ domain_is_used_by_other_app() {
 
 app_get() { jq -r --arg a "$1" --arg k "$2" '.[$a][$k] // empty' "${CIPI_CONFIG}/apps.json"; }
 
-# When Cipi API is configured, allow www-data to read apps.json (group rx on dir, r on file)
+# When Cipi API is configured, allow www-data to read apps.json via a dedicated
+# cipi-api group. App users belong to www-data but NOT cipi-api, so they cannot
+# read other apps' webhook tokens.
 ensure_apps_json_api_access() {
     [[ -f "${CIPI_CONFIG}/api.json" ]] || return 0
     [[ -f "${CIPI_CONFIG}/apps.json" ]] || return 0
+    if ! getent group cipi-api &>/dev/null; then
+        groupadd cipi-api 2>/dev/null || true
+    fi
+    if ! id -nG www-data 2>/dev/null | grep -qw cipi-api; then
+        usermod -aG cipi-api www-data 2>/dev/null || true
+    fi
+    chgrp cipi-api "${CIPI_CONFIG}" 2>/dev/null || true
     chmod 750 "${CIPI_CONFIG}" 2>/dev/null || true
-    chgrp www-data "${CIPI_CONFIG}" 2>/dev/null || true
+    chgrp cipi-api "${CIPI_CONFIG}/apps.json" 2>/dev/null || true
     chmod 640 "${CIPI_CONFIG}/apps.json" 2>/dev/null || true
-    chgrp www-data "${CIPI_CONFIG}/apps.json" 2>/dev/null || true
 }
 
 app_set() {

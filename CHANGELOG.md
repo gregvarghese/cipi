@@ -4,6 +4,19 @@ All notable changes to Cipi are documented in this file.
 
 ---
 
+## [4.0.8] — 2026-03-06
+
+### Security
+
+- **apps.json isolation**: app users could read other apps' webhook tokens via shared `www-data` group membership. Introduced dedicated `cipi-api` group — only `www-data` (PHP-FPM) belongs to it, so app SSH users can no longer access `/etc/cipi/apps.json`
+
+### Changed
+
+- `ensure_apps_json_api_access()` now creates and uses a `cipi-api` group instead of relying on the `www-data` group directly
+- Migration `4.0.8.sh` fixes permissions on existing servers and restarts PHP-FPM to pick up the new group
+
+---
+
 ## [4.0.7] — 2026-03-06
 
 ### Added
