@@ -29,9 +29,8 @@ _ensure_awscli() {
 
 # Wrapper: adds --endpoint-url when a custom endpoint is configured
 _aws_s3() {
-    local cf="${CIPI_CONFIG}/backup.json"
     local ep=""
-    [[ -f "$cf" ]] && ep=$(jq -r '.endpoint_url // ""' "$cf")
+    [[ -f "${CIPI_CONFIG}/backup.json" ]] && ep=$(vault_read backup.json | jq -r '.endpoint_url // ""')
     if [[ -n "$ep" ]]; then
         aws s3 --endpoint-url "$ep" "$@"
     else
@@ -44,11 +43,12 @@ _bk_configure() {
     local cf="${CIPI_CONFIG}/backup.json"
     local ck="" cs="" cb="" cr="" ce=""
     if [[ -f "$cf" ]]; then
-        ck=$(jq -r '.aws_key    // ""' "$cf")
-        cs=$(jq -r '.aws_secret // ""' "$cf")
-        cb=$(jq -r '.bucket     // ""' "$cf")
-        cr=$(jq -r '.region     // ""' "$cf")
-        ce=$(jq -r '.endpoint_url // ""' "$cf")
+        local _bkj; _bkj=$(vault_read backup.json)
+        ck=$(echo "$_bkj" | jq -r '.aws_key    // ""')
+        cs=$(echo "$_bkj" | jq -r '.aws_secret // ""')
+        cb=$(echo "$_bkj" | jq -r '.bucket     // ""')
+        cr=$(echo "$_bkj" | jq -r '.region     // ""')
+        ce=$(echo "$_bkj" | jq -r '.endpoint_url // ""')
     fi
 
     read_input "Access Key ID" "$ck" ck
@@ -67,8 +67,7 @@ _bk_configure() {
         --arg k "$ck" --arg s "$cs" --arg b "$cb" \
         --arg r "$cr" --arg e "$ce" \
         '{"aws_key":$k,"aws_secret":$s,"bucket":$b,"region":$r,"endpoint_url":$e}' \
-        > "$cf"
-    chmod 600 "$cf"
+        | vault_write backup.json
 
     mkdir -p /root/.aws
     cat > /root/.aws/credentials <<AWSCREDS
@@ -97,7 +96,7 @@ _bk_run() {
     _ensure_awscli
     local target="${1:-}" cf="${CIPI_CONFIG}/backup.json"
     [[ ! -f "$cf" ]] && { error "Run: cipi backup configure"; exit 1; }
-    local bucket; bucket=$(jq -r '.bucket' "$cf")
+    local bucket; bucket=$(vault_read backup.json | jq -r '.bucket')
     local dbr; dbr=$(get_db_root_password)
     local ts; ts=$(date +%Y-%m-%d_%H%M%S)
     local tmp="/tmp/cipi-bk-${ts}"; mkdir -p "$tmp"
@@ -141,7 +140,7 @@ _bk_run() {
     else
         while IFS= read -r a; do
             [[ -n "$a" ]] && _do_backup "$a"
-        done < <(jq -r 'keys[]' "${CIPI_CONFIG}/apps.json" 2>/dev/null)
+        done < <(vault_read apps.json | jq -r 'keys[]' 2>/dev/null)
     fi
     rm -rf "$tmp"
 
@@ -196,7 +195,7 @@ _bk_prune() {
         local app="$1"
         [[ ! -f "$cf" ]] && { warn "S3 not configured — skipping S3 prune for '${app}'"; return; }
         _ensure_awscli
-        local bucket; bucket=$(jq -r '.bucket' "$cf")
+        local bucket; bucket=$(vault_read backup.json | jq -r '.bucket')
         local prefix="cipi/${app}/"
         local found=0
         while IFS= read -r folder; do
@@ -230,7 +229,7 @@ _bk_prune() {
         _prune_app "$target"
     else
         local apps
-        apps=$(jq -r 'keys[]' "${CIPI_CONFIG}/apps.json" 2>/dev/null) || true
+        apps=$(vault_read apps.json | jq -r 'keys[]' 2>/dev/null) || true
         [[ -z "$apps" ]] && { warn "No apps found"; exit 0; }
         while IFS= read -r a; do _prune_app "$a"; done <<< "$apps"
     fi
@@ -244,7 +243,7 @@ _bk_list() {
     _ensure_awscli
     local target="${1:-}" cf="${CIPI_CONFIG}/backup.json"
     [[ ! -f "$cf" ]] && { error "Run: cipi backup configure"; exit 1; }
-    local bucket; bucket=$(jq -r '.bucket' "$cf")
+    local bucket; bucket=$(vault_read backup.json | jq -r '.bucket')
     echo -e "\n${BOLD}Backups${NC}"
     local ls_err
     if [[ -n "$target" ]]; then

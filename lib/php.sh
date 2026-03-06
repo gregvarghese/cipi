@@ -54,7 +54,7 @@ _php_remove() {
     [[ -z "$v" ]] && { error "Usage: cipi php remove <ver>"; exit 1; }
     validate_php_version "$v" || { error "Invalid: $v"; exit 1; }
     if [[ -f "${CIPI_CONFIG}/apps.json" ]]; then
-        local using; using=$(jq -r --arg v "$v" 'to_entries[]|select(.value.php==$v)|.key' "${CIPI_CONFIG}/apps.json" 2>/dev/null)
+        local using; using=$(vault_read apps.json | jq -r --arg v "$v" 'to_entries[]|select(.value.php==$v)|.key' 2>/dev/null)
         [[ -n "$using" ]] && { error "In use by: $using"; exit 1; }
     fi
     confirm "Remove PHP ${v}?" || return
@@ -69,7 +69,7 @@ _php_list() {
         if php_is_installed "$v"; then
             local st="${RED}stopped" c="${RED}"
             systemctl is-active --quiet "php${v}-fpm" 2>/dev/null && st="running" && c="${GREEN}"
-            local n=0; [[ -f "${CIPI_CONFIG}/apps.json" ]] && n=$(jq --arg v "$v" '[to_entries[]|select(.value.php==$v)]|length' "${CIPI_CONFIG}/apps.json" 2>/dev/null||echo 0)
+            local n=0; [[ -f "${CIPI_CONFIG}/apps.json" ]] && n=$(vault_read apps.json | jq --arg v "$v" '[to_entries[]|select(.value.php==$v)]|length' 2>/dev/null||echo 0)
             printf "  PHP %-6s ${c}● %-8s${NC}  %d apps\n" "$v" "$st" "$n"
         fi
     done; echo ""

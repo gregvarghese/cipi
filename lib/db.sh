@@ -31,10 +31,9 @@ CREATE USER IF NOT EXISTS '${user}'@'localhost' IDENTIFIED BY '${pass}';
 GRANT ALL PRIVILEGES ON \`${name}\`.* TO '${user}'@'localhost';
 FLUSH PRIVILEGES;
 SQL
-    local tmp; tmp=$(mktemp)
-    jq --arg n "$name" --arg u "$user" '.[$n]={"user":$u,"created_at":(now|strftime("%Y-%m-%dT%H:%M:%SZ"))}' \
-        "${CIPI_CONFIG}/databases.json">"$tmp"
-    mv "$tmp" "${CIPI_CONFIG}/databases.json"; chmod 600 "${CIPI_CONFIG}/databases.json"
+    vault_read databases.json | \
+        jq --arg n "$name" --arg u "$user" '.[$n]={"user":$u,"created_at":(now|strftime("%Y-%m-%dT%H:%M:%SZ"))}' | \
+        vault_write databases.json
     log_action "DB CREATED: $name"
     echo -e "\n${GREEN}✓${NC} Database: ${CYAN}${name}${NC}  User: ${CYAN}${user}${NC}  Password: ${CYAN}${pass}${NC}"
     echo -e "${YELLOW}Save this password!${NC}\n"
@@ -49,7 +48,7 @@ _db_list() {
         FROM information_schema.tables
         WHERE table_schema NOT IN('information_schema','mysql','performance_schema','sys')
         GROUP BY table_schema ORDER BY table_schema;" 2>/dev/null | while IFS=$'\t' read -r db sz; do
-        local u; u=$(jq -r --arg n "$db" '.[$n].user//"—"' "${CIPI_CONFIG}/databases.json" 2>/dev/null)
+        local u; u=$(vault_read databases.json | jq -r --arg n "$db" '.[$n].user//"—"' 2>/dev/null)
         printf "  %-20s %-15s %s MB\n" "$db" "$u" "$sz"
     done; echo ""
 }
@@ -58,11 +57,9 @@ _db_delete() {
     local name="${1:-}"; [[ -z "$name" ]] && { error "Usage: cipi db delete <name>"; exit 1; }
     confirm "Delete database '${name}'?" || return
     local dbr; dbr=$(get_db_root_password)
-    local u; u=$(jq -r --arg n "$name" '.[$n].user//$n' "${CIPI_CONFIG}/databases.json" 2>/dev/null)
+    local u; u=$(vault_read databases.json | jq -r --arg n "$name" '.[$n].user//$n' 2>/dev/null)
     mariadb -u root -p"$dbr" -e "DROP DATABASE IF EXISTS \`${name}\`; DROP USER IF EXISTS '${u}'@'localhost'; FLUSH PRIVILEGES;" 2>/dev/null
-    local tmp; tmp=$(mktemp)
-    jq --arg n "$name" 'del(.[$n])' "${CIPI_CONFIG}/databases.json">"$tmp"
-    mv "$tmp" "${CIPI_CONFIG}/databases.json"; chmod 600 "${CIPI_CONFIG}/databases.json"
+    vault_read databases.json | jq --arg n "$name" 'del(.[$n])' | vault_write databases.json
     log_action "DB DELETED: $name"; success "'${name}' deleted"
 }
 
@@ -90,7 +87,7 @@ _db_restore() {
 _db_password() {
     local name="${1:-}"; [[ -z "$name" ]] && { error "Usage: cipi db password <name>"; exit 1; }
     local dbr; dbr=$(get_db_root_password)
-    local u; u=$(jq -r --arg n "$name" '.[$n].user//$n' "${CIPI_CONFIG}/databases.json" 2>/dev/null)
+    local u; u=$(vault_read databases.json | jq -r --arg n "$name" '.[$n].user//$n' 2>/dev/null)
     local np; np=$(generate_password 32)
     mariadb -u root -p"$dbr" -e "ALTER USER '${u}'@'localhost' IDENTIFIED BY '${np}'; FLUSH PRIVILEGES;" 2>/dev/null
     echo -e "\n${GREEN}✓${NC} New password for '${u}': ${CYAN}${np}${NC}"

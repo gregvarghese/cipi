@@ -223,13 +223,14 @@ SUDO
 # ── LIST ──────────────────────────────────────────────────────
 
 app_list() {
-    if [[ ! -f "${CIPI_CONFIG}/apps.json" ]] || [[ $(jq 'length' "${CIPI_CONFIG}/apps.json") -eq 0 ]]; then
+    local _aj; _aj=$(vault_read apps.json)
+    if [[ $(echo "$_aj" | jq 'length') -eq 0 ]]; then
         info "No apps. Create one: cipi app create"; return
     fi
     printf "\n${BOLD}%-14s %-28s %-6s %s${NC}\n" "APP" "DOMAIN" "PHP" "CREATED"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    jq -r 'to_entries[]|"\(.key)\t\(.value.domain)\t\(.value.php)\t\(.value.created_at)"' \
-        "${CIPI_CONFIG}/apps.json" | while IFS=$'\t' read -r a d p c; do
+    echo "$_aj" | jq -r 'to_entries[]|"\(.key)\t\(.value.domain)\t\(.value.php)\t\(.value.created_at)"' \
+        | while IFS=$'\t' read -r a d p c; do
         local st="${GREEN}●${NC}"
         systemctl is-active --quiet "php${p}-fpm" 2>/dev/null || st="${RED}●${NC}"
         printf "  ${st} %-12s %-28s %-6s %s\n" "$a" "$d" "$p" "${c:0:10}"
@@ -246,7 +247,7 @@ app_show() {
     d=$(app_get "$app" domain); p=$(app_get "$app" php); b=$(app_get "$app" branch)
     repo=$(app_get "$app" repository)
     wt=$(app_get "$app" webhook_token); ca=$(app_get "$app" created_at)
-    aliases=$(jq -r --arg a "$app" '.[$a].aliases//[]|join(", ")' "${CIPI_CONFIG}/apps.json")
+    aliases=$(vault_read apps.json | jq -r --arg a "$app" '.[$a].aliases//[]|join(", ")')
     [[ -z "$aliases" ]] && aliases="none"
 
     echo -e "\n${BOLD}${app}${NC}"
@@ -418,9 +419,7 @@ alias_add() {
     local primary; primary=$(app_get "$app" domain)
     [[ "$dom" == "$primary" ]] && { error "'${dom}' is already the primary domain"; exit 1; }
     domain_is_used_by_other_app "$dom" "$app" && { error "Domain '${dom}' is already used by app '${DOMAIN_USED_BY_APP}'"; exit 1; }
-    local tmp; tmp=$(mktemp)
-    jq --arg a "$app" --arg d "$dom" '.[$a].aliases+=[$d]|.[$a].aliases|=unique' "${CIPI_CONFIG}/apps.json">"$tmp"
-    mv "$tmp" "${CIPI_CONFIG}/apps.json"; chmod 600 "${CIPI_CONFIG}/apps.json"
+    vault_read apps.json | jq --arg a "$app" --arg d "$dom" '.[$a].aliases+=[$d]|.[$a].aliases|=unique' | vault_write apps.json
     ensure_apps_json_api_access
     _create_nginx_vhost "$app" "$(app_get "$app" domain)" "$(app_get "$app" php)"; reload_nginx
     log_action "ALIAS ADDED: $dom → $app"
@@ -432,9 +431,7 @@ alias_remove() {
     local app="${1:-}" dom="${2:-}"
     [[ -z "$app" || -z "$dom" ]] && { error "Usage: cipi alias remove <app> <domain>"; exit 1; }
     app_exists "$app" || { error "Not found"; exit 1; }
-    local tmp; tmp=$(mktemp)
-    jq --arg a "$app" --arg d "$dom" '.[$a].aliases-=[$d]' "${CIPI_CONFIG}/apps.json">"$tmp"
-    mv "$tmp" "${CIPI_CONFIG}/apps.json"; chmod 600 "${CIPI_CONFIG}/apps.json"
+    vault_read apps.json | jq --arg a "$app" --arg d "$dom" '.[$a].aliases-=[$d]' | vault_write apps.json
     ensure_apps_json_api_access
     _create_nginx_vhost "$app" "$(app_get "$app" domain)" "$(app_get "$app" php)"; reload_nginx
     success "'${dom}' removed from '${app}'"
@@ -445,7 +442,7 @@ alias_list() {
     app_exists "$app" || { error "Not found"; exit 1; }
     echo -e "\n${BOLD}Domains for '${app}'${NC}"
     echo -e "  Primary: ${CYAN}$(app_get "$app" domain)${NC}"
-    jq -r --arg a "$app" '.[$a].aliases // [] | .[]' "${CIPI_CONFIG}/apps.json" | while read -r a; do
+    vault_read apps.json | jq -r --arg a "$app" '.[$a].aliases // [] | .[]' | while read -r a; do
         echo -e "  Alias:   ${CYAN}${a}${NC}"
     done; echo ""
 }
@@ -486,7 +483,7 @@ _create_nginx_vhost() {
         aliases_raw="${4:-}"
     else
         # Exclude primary domain from aliases to avoid duplicates
-        aliases_raw=$(jq -r --arg a "$app" --arg d "$domain" '.[$a].aliases // [] | map(select(. != $d)) | .[]' "${CIPI_CONFIG}/apps.json" 2>/dev/null || true)
+        aliases_raw=$(vault_read apps.json | jq -r --arg a "$app" --arg d "$domain" '.[$a].aliases // [] | map(select(. != $d)) | .[]' 2>/dev/null || true)
     fi
     # Deduplicate: domain + aliases, preserving order, avoiding Nginx "conflicting server name" warnings
     names=$(echo -e "${domain}\n${aliases_raw}" | grep -v '^[[:space:]]*$' | awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ $//')

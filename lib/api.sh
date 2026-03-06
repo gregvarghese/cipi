@@ -21,11 +21,10 @@ api_setup() {
     # Save config
     mkdir -p "${CIPI_CONFIG}"
     if [[ -f "${CIPI_API_CONFIG}" ]]; then
-        local cur; cur=$(jq -r '.domain' "${CIPI_API_CONFIG}" 2>/dev/null)
+        local cur; cur=$(vault_read api.json | jq -r '.domain' 2>/dev/null)
         [[ -n "$cur" && "$cur" != "$domain" ]] && step "Updating domain: ${cur} → ${domain}"
     fi
-    echo "{\"domain\": \"${domain}\"}" > "${CIPI_API_CONFIG}"
-    chmod 600 "${CIPI_API_CONFIG}"
+    echo "{\"domain\": \"${domain}\"}" | vault_write api.json
     success "Config saved"
 
     # Ensure Laravel API app exists
@@ -284,7 +283,7 @@ api_upgrade() {
     [[ ! -f "${CIPI_API_CONFIG}" ]] && { error "API not configured. Run: cipi api <domain>"; exit 1; }
     [[ ! -f "${CIPI_API_ROOT}/artisan" ]] && { error "Laravel API app not found."; exit 1; }
 
-    local domain; domain=$(jq -r '.domain' "${CIPI_API_CONFIG}")
+    local domain; domain=$(vault_read api.json | jq -r '.domain')
 
     echo ""
     echo -e "${YELLOW}${BOLD}Full rebuild: fresh Laravel + cipi-api package${NC}"
@@ -389,7 +388,7 @@ api_status() {
 
     chown -R www-data:www-data "${CIPI_API_ROOT}/storage" "${CIPI_API_ROOT}/database" "${CIPI_API_ROOT}/bootstrap/cache" 2>/dev/null || true
 
-    local domain; domain=$(jq -r '.domain' "${CIPI_API_CONFIG}" 2>/dev/null)
+    local domain; domain=$(vault_read api.json | jq -r '.domain' 2>/dev/null)
 
     echo ""
     echo -e "${BOLD}Cipi API Status${NC}"
@@ -428,7 +427,7 @@ _api_show_versions() {
 
 api_ssl() {
     [[ ! -f "${CIPI_API_CONFIG}" ]] && { error "API not configured. Run: cipi api <domain>"; exit 1; }
-    local domain; domain=$(jq -r '.domain' "${CIPI_API_CONFIG}")
+    local domain; domain=$(vault_read api.json | jq -r '.domain')
     [[ -z "$domain" || "$domain" == "null" ]] && { error "No domain in api.json"; exit 1; }
 
     echo ""

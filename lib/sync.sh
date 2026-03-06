@@ -22,6 +22,7 @@ _sync_export() {
     local with_db="${ARG_with_db:-false}"
     local with_storage="${ARG_with_storage:-false}"
     local output="${ARG_output:-}"
+    local passphrase="${ARG_passphrase:-}"
     local ts; ts=$(date +%Y%m%d_%H%M%S)
     local hostname; hostname=$(hostname 2>/dev/null || echo "unknown")
     local tmp="/tmp/cipi-sync-${ts}"
@@ -36,10 +37,11 @@ _sync_export() {
 
     # If no apps specified, export all
     if [[ ${#apps[@]} -eq 0 ]]; then
-        if [[ ! -f "${CIPI_CONFIG}/apps.json" ]] || [[ $(jq 'length' "${CIPI_CONFIG}/apps.json") -eq 0 ]]; then
+        local _aj; _aj=$(vault_read apps.json)
+        if [[ $(echo "$_aj" | jq 'length') -eq 0 ]]; then
             error "No apps found"; exit 1
         fi
-        mapfile -t apps < <(jq -r 'keys[]' "${CIPI_CONFIG}/apps.json")
+        mapfile -t apps < <(echo "$_aj" | jq -r 'keys[]')
     fi
 
     # Validate all requested apps exist
@@ -54,21 +56,20 @@ _sync_export() {
 
     mkdir -p "${tmp}/config" "${tmp}/apps"
 
-    # 1. Filter apps.json to only included apps
+    # 1. Filter apps.json to only included apps (decrypt for export)
     step "Config files..."
     local apps_filter; apps_filter=$(printf '%s\n' "${apps[@]}" | jq -R . | jq -s .)
-    jq --argjson sel "$apps_filter" 'with_entries(select(.key as $k | $sel | index($k) != null))' \
-        "${CIPI_CONFIG}/apps.json" > "${tmp}/config/apps.json"
+    vault_read apps.json | jq --argjson sel "$apps_filter" \
+        'with_entries(select(.key as $k | $sel | index($k) != null))' \
+        > "${tmp}/config/apps.json"
 
     # databases.json: include app DBs + standalone DBs that match app names
-    if [[ -f "${CIPI_CONFIG}/databases.json" ]]; then
-        cp "${CIPI_CONFIG}/databases.json" "${tmp}/config/databases.json"
-    fi
+    [[ -f "${CIPI_CONFIG}/databases.json" ]] && vault_read databases.json > "${tmp}/config/databases.json"
 
-    # Optional configs (backup, api, smtp)
-    [[ -f "${CIPI_CONFIG}/backup.json" ]] && cp "${CIPI_CONFIG}/backup.json" "${tmp}/config/backup.json"
-    [[ -f "${CIPI_CONFIG}/api.json" ]]    && cp "${CIPI_CONFIG}/api.json" "${tmp}/config/api.json"
-    [[ -f "${CIPI_CONFIG}/smtp.json" ]]   && cp "${CIPI_CONFIG}/smtp.json" "${tmp}/config/smtp.json"
+    # Optional configs (decrypt for export)
+    [[ -f "${CIPI_CONFIG}/backup.json" ]] && vault_read backup.json > "${tmp}/config/backup.json"
+    [[ -f "${CIPI_CONFIG}/api.json" ]]    && vault_read api.json    > "${tmp}/config/api.json"
+    [[ -f "${CIPI_CONFIG}/smtp.json" ]]   && vault_read smtp.json   > "${tmp}/config/smtp.json"
     [[ -f "${CIPI_CONFIG}/version" ]]     && cp "${CIPI_CONFIG}/version" "${tmp}/config/version"
     success "Config files"
 
@@ -153,15 +154,31 @@ _sync_export() {
             with_storage: ($with_storage == "true")
         }' > "${tmp}/manifest.json"
 
-    # 4. Create archive
+    # 4. Create encrypted archive
     step "Creating archive..."
-    tar -czf "$archive" -C /tmp "cipi-sync-${ts}"
+    if [[ -z "$passphrase" ]]; then
+        echo ""
+        while true; do
+            read -rsp "  Enter passphrase to encrypt the archive: " passphrase; echo
+            [[ ${#passphrase} -ge 8 ]] && break
+            warn "Passphrase must be at least 8 characters"
+        done
+        local passphrase2=""
+        read -rsp "  Confirm passphrase: " passphrase2; echo
+        [[ "$passphrase" != "$passphrase2" ]] && { error "Passphrases do not match"; rm -rf "$tmp"; exit 1; }
+    else
+        [[ ${#passphrase} -lt 8 ]] && { error "Passphrase must be at least 8 characters"; rm -rf "$tmp"; exit 1; }
+    fi
+
+    archive="${archive%.tar.gz}.tar.gz.enc"
+    tar -czf - -C /tmp "cipi-sync-${ts}" | \
+        openssl enc -aes-256-cbc -salt -pbkdf2 -pass pass:"$passphrase" -out "$archive"
     rm -rf "$tmp"
 
     local total_sz; total_sz=$(du -h "$archive" | cut -f1)
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo -e "  ${GREEN}${BOLD}EXPORT COMPLETE${NC}"
+    echo -e "  ${GREEN}${BOLD}EXPORT COMPLETE (encrypted)${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo -e "  File:     ${CYAN}${archive}${NC}"
     echo -e "  Size:     ${CYAN}${total_sz}${NC}"
@@ -181,12 +198,23 @@ _sync_export() {
 # ── LIST (inspect archive) ────────────────────────────────────
 
 _sync_list() {
-    local file="${1:-}"
-    [[ -z "$file" ]] && { error "Usage: cipi sync list <archive.tar.gz>"; exit 1; }
+    parse_args "$@"
+    local file="" passphrase="${ARG_passphrase:-}"
+    for arg in "$@"; do
+        [[ "$arg" == --* ]] && continue
+        [[ -z "$file" ]] && file="$arg"
+    done
+    [[ -z "$file" ]] && { error "Usage: cipi sync list <archive.tar.gz[.enc]> [--passphrase=...]"; exit 1; }
     [[ ! -f "$file" ]] && { error "File not found: $file"; exit 1; }
 
     local tmp; tmp=$(mktemp -d)
-    tar -xzf "$file" -C "$tmp" 2>/dev/null || { error "Invalid archive"; rm -rf "$tmp"; exit 1; }
+    if ! tar -tzf "$file" &>/dev/null; then
+        [[ -z "$passphrase" ]] && { read -rsp "Archive is encrypted. Enter passphrase: " passphrase; echo; }
+        openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:"$passphrase" -in "$file" 2>/dev/null \
+            | tar -xzf - -C "$tmp" 2>/dev/null || { error "Decryption failed or invalid archive"; rm -rf "$tmp"; exit 1; }
+    else
+        tar -xzf "$file" -C "$tmp" 2>/dev/null || { error "Invalid archive"; rm -rf "$tmp"; exit 1; }
+    fi
 
     local base; base=$(ls "$tmp" | head -1)
     local dir="${tmp}/${base}"
@@ -244,22 +272,29 @@ _sync_import() {
     local run_deploy="${ARG_deploy:-false}"
     local skip_confirm="${ARG_yes:-false}"
     local update_mode="${ARG_update:-false}"
+    local passphrase="${ARG_passphrase:-}"
 
     for arg in "$@"; do
         [[ "$arg" == --* ]] && continue
-        if [[ -z "$file" && "$arg" == *.tar.gz ]]; then
+        if [[ -z "$file" && ( "$arg" == *.tar.gz || "$arg" == *.tar.gz.enc ) ]]; then
             file="$arg"
         else
             [[ -n "$arg" ]] && selected_apps+=("$arg")
         fi
     done
 
-    [[ -z "$file" ]] && { error "Usage: cipi sync import <archive.tar.gz> [app1 ...] [--update] [--deploy] [--yes]"; exit 1; }
+    [[ -z "$file" ]] && { error "Usage: cipi sync import <archive.tar.gz[.enc]> [app1 ...] [--update] [--deploy] [--yes] [--passphrase=...]"; exit 1; }
     [[ ! -f "$file" ]] && { error "File not found: $file"; exit 1; }
 
-    # Extract archive
+    # Extract archive (handle encrypted archives transparently)
     local tmp; tmp=$(mktemp -d)
-    tar -xzf "$file" -C "$tmp" 2>/dev/null || { error "Invalid archive"; rm -rf "$tmp"; exit 1; }
+    if ! tar -tzf "$file" &>/dev/null; then
+        [[ -z "$passphrase" ]] && { read -rsp "Archive is encrypted. Enter passphrase: " passphrase; echo; }
+        openssl enc -d -aes-256-cbc -pbkdf2 -pass pass:"$passphrase" -in "$file" 2>/dev/null \
+            | tar -xzf - -C "$tmp" 2>/dev/null || { error "Decryption failed or invalid archive"; rm -rf "$tmp"; exit 1; }
+    else
+        tar -xzf "$file" -C "$tmp" 2>/dev/null || { error "Invalid archive"; rm -rf "$tmp"; exit 1; }
+    fi
 
     local base; base=$(ls "$tmp" | head -1)
     local dir="${tmp}/${base}"
@@ -745,6 +780,7 @@ _sync_push() {
     local remote_import="${ARG_import:-false}"
     local with_db="${ARG_with_db:-false}"
     local with_storage="${ARG_with_storage:-false}"
+    local passphrase="${ARG_passphrase:-}"
 
     # Collect app names (positional args, excluding --flags)
     local -a app_args=()
@@ -800,6 +836,7 @@ _sync_push() {
     local -a export_flags=()
     [[ "$with_db" == "true" ]] && export_flags+=("--with-db")
     [[ "$with_storage" == "true" ]] && export_flags+=("--with-storage")
+    [[ -n "$passphrase" ]] && export_flags+=("--passphrase=${passphrase}")
 
     # Run local export
     echo ""
@@ -807,9 +844,9 @@ _sync_push() {
     echo "────────────────────────────────────────────────"
     _sync_export "${app_args[@]}" "${export_flags[@]}" 2>&1
 
-    # Find the archive that was just created
+    # Find the archive that was just created (encrypted .enc or plain .tar.gz)
     local archive
-    archive=$(ls -t /tmp/cipi-sync-*.tar.gz 2>/dev/null | head -1)
+    archive=$(ls -t /tmp/cipi-sync-*.tar.gz.enc /tmp/cipi-sync-*.tar.gz 2>/dev/null | head -1)
     [[ -z "$archive" || ! -f "$archive" ]] && { error "Export archive not found"; exit 1; }
 
     local archive_name; archive_name=$(basename "$archive")
@@ -845,6 +882,7 @@ _sync_push() {
         info "Phase 3: Remote Import"
         echo "────────────────────────────────────────────────"
         local -a remote_cmd=("cipi" "sync" "import" "/tmp/${archive_name}" "--yes" "--update")
+        [[ -n "$passphrase" ]] && remote_cmd+=("--passphrase=${passphrase}")
         [[ ${#app_args[@]} -gt 0 ]] && remote_cmd+=("${app_args[@]}")
 
         step "Running: ${remote_cmd[*]}"

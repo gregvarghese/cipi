@@ -3,6 +3,8 @@
 # Cipi — Common Functions
 #############################################
 
+source "${CIPI_LIB}/vault.sh"
+
 info()    { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
@@ -37,7 +39,7 @@ validate_php_version() {
 php_is_installed() { dpkg -l "php${1}-fpm" &>/dev/null 2>&1; }
 
 app_exists() {
-    [[ -f "${CIPI_CONFIG}/apps.json" ]] && jq -e --arg a "$1" '.[$a]' "${CIPI_CONFIG}/apps.json" &>/dev/null
+    [[ -f "${CIPI_CONFIG}/apps.json" ]] && vault_read apps.json | jq -e --arg a "$1" '.[$a]' &>/dev/null
 }
 
 # Check if domain is used by another app (domain or alias). Exclude app name when editing.
@@ -46,15 +48,15 @@ domain_is_used_by_other_app() {
     local dom="$1" exclude_app="${2:-}"
     DOMAIN_USED_BY_APP=""
     [[ ! -f "${CIPI_CONFIG}/apps.json" ]] && return 1
-    DOMAIN_USED_BY_APP=$(jq -r --arg d "$dom" --arg e "$exclude_app" '
+    DOMAIN_USED_BY_APP=$(vault_read apps.json | jq -r --arg d "$dom" --arg e "$exclude_app" '
         to_entries[] | select(.key != $e) |
         select(.value.domain == $d or ((.value.aliases // []) | index($d) != null)) |
         .key
-    ' "${CIPI_CONFIG}/apps.json" 2>/dev/null | head -1)
+    ' 2>/dev/null | head -1)
     [[ -n "$DOMAIN_USED_BY_APP" ]]
 }
 
-app_get() { jq -r --arg a "$1" --arg k "$2" '.[$a][$k] // empty' "${CIPI_CONFIG}/apps.json"; }
+app_get() { vault_read apps.json | jq -r --arg a "$1" --arg k "$2" '.[$a][$k] // empty'; }
 
 # When Cipi API is configured, allow www-data to read apps.json via a dedicated
 # cipi-api group. App users belong to www-data but NOT cipi-api, so they cannot
@@ -75,30 +77,27 @@ ensure_apps_json_api_access() {
 }
 
 app_set() {
-    local tmp; tmp=$(mktemp)
-    jq --arg a "$1" --arg k "$2" --arg v "$3" '.[$a][$k] = $v' "${CIPI_CONFIG}/apps.json" > "$tmp"
-    mv "$tmp" "${CIPI_CONFIG}/apps.json"; chmod 600 "${CIPI_CONFIG}/apps.json"
+    vault_read apps.json | jq --arg a "$1" --arg k "$2" --arg v "$3" '.[$a][$k] = $v' | vault_write apps.json
     ensure_apps_json_api_access
 }
 
 app_save() {
-    [[ -f "${CIPI_CONFIG}/apps.json" ]] || echo "{}" > "${CIPI_CONFIG}/apps.json"
-    local tmp; tmp=$(mktemp)
-    if ! jq --arg a "$1" --argjson d "$2" '.[$a] = $d' "${CIPI_CONFIG}/apps.json" > "$tmp" 2>/dev/null; then
-        error "Failed to save app config (invalid JSON?)"; rm -f "$tmp"; return 1
+    local json
+    json=$(vault_read apps.json) || json="{}"
+    local result
+    if ! result=$(echo "$json" | jq --arg a "$1" --argjson d "$2" '.[$a] = $d' 2>/dev/null); then
+        error "Failed to save app config (invalid JSON?)"; return 1
     fi
-    mv "$tmp" "${CIPI_CONFIG}/apps.json"; chmod 600 "${CIPI_CONFIG}/apps.json"
+    echo "$result" | vault_write apps.json
     ensure_apps_json_api_access
 }
 
 app_remove() {
-    local tmp; tmp=$(mktemp)
-    jq --arg a "$1" 'del(.[$a])' "${CIPI_CONFIG}/apps.json" > "$tmp"
-    mv "$tmp" "${CIPI_CONFIG}/apps.json"; chmod 600 "${CIPI_CONFIG}/apps.json"
+    vault_read apps.json | jq --arg a "$1" 'del(.[$a])' | vault_write apps.json
     ensure_apps_json_api_access
 }
 
-get_db_root_password() { jq -r '.db_root_password' "${CIPI_CONFIG}/server.json"; }
+get_db_root_password() { vault_read server.json | jq -r '.db_root_password'; }
 
 confirm() {
     echo -e -n "${YELLOW}${1:-Are you sure?} [y/N]: ${NC}"; read -r r; [[ "$r" =~ ^[Yy]$ ]]
@@ -159,9 +158,10 @@ EOF
 # Init config on source
 mkdir -p "${CIPI_CONFIG}" "${CIPI_LOG}"
 chmod 700 "${CIPI_CONFIG}"
+vault_init
 for f in apps.json databases.json; do
     if [[ ! -f "${CIPI_CONFIG}/$f" ]]; then
-        echo "{}" > "${CIPI_CONFIG}/$f" && chmod 600 "${CIPI_CONFIG}/$f"
+        echo "{}" | vault_write "$f"
     fi
 done
 ensure_apps_json_api_access

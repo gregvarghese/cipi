@@ -7,19 +7,15 @@
 # ── SERVER.JSON HELPERS ──────────────────────────────────────
 
 _git_server_get() {
-    jq -r --arg k "$1" '.[$k] // empty' "${CIPI_CONFIG}/server.json"
+    vault_read server.json | jq -r --arg k "$1" '.[$k] // empty'
 }
 
 _git_server_set() {
-    local tmp; tmp=$(mktemp)
-    jq --arg k "$1" --arg v "$2" '.[$k] = $v' "${CIPI_CONFIG}/server.json" > "$tmp"
-    mv "$tmp" "${CIPI_CONFIG}/server.json"; chmod 600 "${CIPI_CONFIG}/server.json"
+    vault_read server.json | jq --arg k "$1" --arg v "$2" '.[$k] = $v' | vault_write server.json
 }
 
 _git_server_remove() {
-    local tmp; tmp=$(mktemp)
-    jq --arg k "$1" 'del(.[$k])' "${CIPI_CONFIG}/server.json" > "$tmp"
-    mv "$tmp" "${CIPI_CONFIG}/server.json"; chmod 600 "${CIPI_CONFIG}/server.json"
+    vault_read server.json | jq --arg k "$1" 'del(.[$k])' | vault_write server.json
 }
 
 # ── DETECT PROVIDER ──────────────────────────────────────────
@@ -281,15 +277,11 @@ git_save_app_data() {
         app_set "$app" git_provider "$provider"
     fi
     if [[ -n "$key_id" ]]; then
-        local tmp; tmp=$(mktemp)
-        jq --arg a "$app" --argjson v "$key_id" '.[$a].git_deploy_key_id = $v' "${CIPI_CONFIG}/apps.json" > "$tmp"
-        mv "$tmp" "${CIPI_CONFIG}/apps.json"; chmod 600 "${CIPI_CONFIG}/apps.json"
+        vault_read apps.json | jq --arg a "$app" --argjson v "$key_id" '.[$a].git_deploy_key_id = $v' | vault_write apps.json
         ensure_apps_json_api_access
     fi
     if [[ -n "$hook_id" ]]; then
-        local tmp; tmp=$(mktemp)
-        jq --arg a "$app" --argjson v "$hook_id" '.[$a].git_webhook_id = $v' "${CIPI_CONFIG}/apps.json" > "$tmp"
-        mv "$tmp" "${CIPI_CONFIG}/apps.json"; chmod 600 "${CIPI_CONFIG}/apps.json"
+        vault_read apps.json | jq --arg a "$app" --argjson v "$hook_id" '.[$a].git_webhook_id = $v' | vault_write apps.json
         ensure_apps_json_api_access
     fi
 }
@@ -297,9 +289,7 @@ git_save_app_data() {
 # Remove git integration data from apps.json
 git_clear_app_data() {
     local app="$1"
-    local tmp; tmp=$(mktemp)
-    jq --arg a "$app" 'del(.[$a].git_provider, .[$a].git_deploy_key_id, .[$a].git_webhook_id)' "${CIPI_CONFIG}/apps.json" > "$tmp"
-    mv "$tmp" "${CIPI_CONFIG}/apps.json"; chmod 600 "${CIPI_CONFIG}/apps.json"
+    vault_read apps.json | jq --arg a "$app" 'del(.[$a].git_provider, .[$a].git_deploy_key_id, .[$a].git_webhook_id)' | vault_write apps.json
     ensure_apps_json_api_access
 }
 
@@ -367,7 +357,7 @@ _git_status() {
 
     # Show apps with git integration
     if [[ -f "${CIPI_CONFIG}/apps.json" ]]; then
-        local apps_with_git; apps_with_git=$(jq -r 'to_entries[] | select(.value.git_provider != null) | "\(.key)\t\(.value.git_provider)\t\(.value.git_deploy_key_id // "-")\t\(.value.git_webhook_id // "-")"' "${CIPI_CONFIG}/apps.json" 2>/dev/null)
+        local apps_with_git; apps_with_git=$(vault_read apps.json | jq -r 'to_entries[] | select(.value.git_provider != null) | "\(.key)\t\(.value.git_provider)\t\(.value.git_deploy_key_id // "-")\t\(.value.git_webhook_id // "-")"' 2>/dev/null)
         if [[ -n "$apps_with_git" ]]; then
             echo ""
             printf "  ${BOLD}%-14s %-10s %-14s %s${NC}\n" "APP" "PROVIDER" "DEPLOY KEY" "WEBHOOK"

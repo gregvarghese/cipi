@@ -14,6 +14,8 @@ readonly CIPI_LOG="/var/log/cipi"
 readonly SMTP_CFG="${CIPI_CONFIG}/smtp.json"
 readonly SMTP_RC="${CIPI_CONFIG}/.msmtprc"
 
+source "${CIPI_LIB}/vault.sh"
+
 OUTPUT=$("$@" 2>&1)
 RC=$?
 
@@ -21,10 +23,11 @@ if [[ $RC -ne 0 ]]; then
     echo "$OUTPUT"
 
     [[ ! -f "$SMTP_CFG" ]] && exit $RC
-    [[ "$(jq -r '.enabled // false' "$SMTP_CFG" 2>/dev/null)" != "true" ]] && exit $RC
+    _SJ=$(vault_read smtp.json 2>/dev/null) || exit $RC
+    [[ "$(echo "$_SJ" | jq -r '.enabled // false')" != "true" ]] && exit $RC
 
-    TO=$(jq -r '.to // empty' "$SMTP_CFG" 2>/dev/null)
-    FROM=$(jq -r '.from // "noreply@localhost"' "$SMTP_CFG" 2>/dev/null)
+    TO=$(echo "$_SJ" | jq -r '.to // empty')
+    FROM=$(echo "$_SJ" | jq -r '.from // "noreply@localhost"')
     [[ -z "$TO" ]] && exit $RC
 
     HOSTNAME=$(hostname 2>/dev/null || echo "unknown")

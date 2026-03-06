@@ -591,12 +591,25 @@ install_cipi() {
 
     chown -R root:root /usr/local/bin/cipi /usr/local/bin/cipi-worker /usr/local/bin/cipi-cron-notify /opt/cipi
 
-    # Init config files
+    # Generate vault key for config encryption
+    if [ ! -f /etc/cipi/.vault_key ]; then
+        openssl rand -base64 32 > /etc/cipi/.vault_key
+        chmod 400 /etc/cipi/.vault_key
+    fi
+
+    # Source vault functions now that lib is installed
+    CIPI_LIB="/opt/cipi/lib" CIPI_CONFIG="/etc/cipi" source /opt/cipi/lib/vault.sh
+
+    # Init config files (encrypted)
     for f in apps.json databases.json; do
         if [ ! -f "/etc/cipi/$f" ]; then
-            echo "{}" > "/etc/cipi/$f"
-            chmod 600 "/etc/cipi/$f"
+            echo "{}" | vault_write "$f"
         fi
+    done
+
+    # Seal any config files written in plaintext earlier in setup
+    for f in server.json; do
+        [ -f "/etc/cipi/$f" ] && vault_seal "$f"
     done
 
     # Version
@@ -671,24 +684,91 @@ AUEOF
 CRONEOF
     ) | crontab -
 
-    # Log rotation for app logs
-    cat > /etc/logrotate.d/cipi-apps <<'EOF'
-/home/*/logs/*.log {
+    # ── GDPR-compliant log rotation ──
+
+    # Application logs (Laravel, PHP-FPM, workers, deploy) — 12 months
+    cat > /etc/logrotate.d/cipi-app-logs <<'EOF'
+/home/*/shared/storage/logs/*.log
+/home/*/logs/php-fpm-*.log
+/home/*/logs/worker-*.log
+/home/*/logs/deploy.log
+/var/log/cipi/*.log
+/var/log/cipi-queue.log {
     daily
     missingok
-    rotate 14
+    rotate 365
     compress
     delaycompress
     notifempty
     create 0640 root root
+}
+EOF
+
+    # HTTP / Navigation logs (nginx access & error) — 90 days
+    cat > /etc/logrotate.d/cipi-http-logs <<'EOF'
+/home/*/logs/nginx-access.log
+/home/*/logs/nginx-error.log
+/var/log/nginx/*.log {
+    daily
+    missingok
+    rotate 90
+    compress
+    delaycompress
+    notifempty
+    create 0640 root adm
     sharedscripts
     postrotate
-        systemctl reload nginx > /dev/null 2>&1 || true
+        [ -f /var/run/nginx.pid ] && kill -USR1 $(cat /var/run/nginx.pid) 2>/dev/null || true
     endscript
 }
 EOF
 
-    echo -e "${GREEN}✓ Cron jobs & log rotation${NC}"
+    # Security logs (firewall, fail2ban, auth) — 12 months
+    cat > /etc/logrotate.d/cipi-security-logs <<'EOF'
+/var/log/fail2ban.log {
+    daily
+    missingok
+    rotate 365
+    compress
+    delaycompress
+    notifempty
+    create 0640 root adm
+    postrotate
+        fail2ban-client flushlogs >/dev/null 2>&1 || true
+    endscript
+}
+/var/log/ufw.log {
+    daily
+    missingok
+    rotate 365
+    compress
+    delaycompress
+    notifempty
+    create 0640 syslog adm
+    postrotate
+        /usr/lib/rsyslog/rsyslog-rotate 2>/dev/null || invoke-rc.d rsyslog rotate >/dev/null 2>&1 || true
+    endscript
+}
+/var/log/auth.log {
+    daily
+    missingok
+    rotate 365
+    compress
+    delaycompress
+    notifempty
+    create 0640 syslog adm
+    postrotate
+        /usr/lib/rsyslog/rsyslog-rotate 2>/dev/null || invoke-rc.d rsyslog rotate >/dev/null 2>&1 || true
+    endscript
+}
+EOF
+
+    # Remove conflicting system logrotate configs
+    rm -f /etc/logrotate.d/cipi-apps
+    rm -f /etc/logrotate.d/nginx
+    rm -f /etc/logrotate.d/fail2ban
+
+    echo -e "${GREEN}✓ Cron jobs & GDPR log rotation${NC}"
 }
 
 # ── FINAL ─────────────────────────────────────────────────────
@@ -698,11 +778,13 @@ final_summary() {
 
     local SERVER_IP
     SERVER_IP=$(curl -s --max-time 5 https://checkip.amazonaws.com 2>/dev/null || echo "N/A")
+    CIPI_LIB="/opt/cipi/lib" CIPI_CONFIG="/etc/cipi" source /opt/cipi/lib/vault.sh
+    local _sj; _sj=$(vault_read server.json)
     local DB_ROOT_PASS
-    DB_ROOT_PASS=$(jq -r '.db_root_password' /etc/cipi/server.json)
+    DB_ROOT_PASS=$(echo "$_sj" | jq -r '.db_root_password')
     local REDIS_USER REDIS_PASS
-    REDIS_USER=$(jq -r '.redis_user // "default"' /etc/cipi/server.json)
-    REDIS_PASS=$(jq -r '.redis_password // ""' /etc/cipi/server.json)
+    REDIS_USER=$(echo "$_sj" | jq -r '.redis_user // "default"')
+    REDIS_PASS=$(echo "$_sj" | jq -r '.redis_password // ""')
 
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

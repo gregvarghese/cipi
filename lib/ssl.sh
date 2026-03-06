@@ -34,7 +34,7 @@ _ssl_install() {
     local domains="-d ${d}"
     local aliases
     # Exclude primary domain from aliases to avoid duplicates
-    aliases=$(jq -r --arg a "$app" --arg d "$d" '.[$a].aliases // [] | map(select(. != $d)) | .[]' "${CIPI_CONFIG}/apps.json" 2>/dev/null || true)
+    aliases=$(vault_read apps.json | jq -r --arg a "$app" --arg d "$d" '.[$a].aliases // [] | map(select(. != $d)) | .[]' 2>/dev/null || true)
     while read -r a; do
         [[ -n "$a" ]] && domains+=" -d ${a}"
     done <<< "${aliases:-}"

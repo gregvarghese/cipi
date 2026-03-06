@@ -8,7 +8,7 @@ readonly SMTP_CFG="${CIPI_CONFIG}/smtp.json"
 readonly SMTP_RC="${CIPI_CONFIG}/.msmtprc"
 
 _smtp_is_enabled() {
-    [[ -f "$SMTP_CFG" ]] && [[ "$(jq -r '.enabled // false' "$SMTP_CFG")" == "true" ]]
+    [[ -f "$SMTP_CFG" ]] && [[ "$(vault_read smtp.json | jq -r '.enabled // false')" == "true" ]]
 }
 
 _smtp_ensure_msmtp() {
@@ -22,13 +22,14 @@ _smtp_ensure_msmtp() {
 # Generate .msmtprc from smtp.json (called after configure)
 _smtp_write_rc() {
     [[ ! -f "$SMTP_CFG" ]] && return 1
+    local _sj; _sj=$(vault_read smtp.json)
     local host port user pass from tls starttls
-    host=$(jq -r '.host // ""' "$SMTP_CFG")
-    port=$(jq -r '.port // 587' "$SMTP_CFG")
-    user=$(jq -r '.user // ""' "$SMTP_CFG")
-    pass=$(jq -r '.password // ""' "$SMTP_CFG")
-    from=$(jq -r '.from // ""' "$SMTP_CFG")
-    tls=$(jq -r '.tls // true' "$SMTP_CFG")
+    host=$(echo "$_sj" | jq -r '.host // ""')
+    port=$(echo "$_sj" | jq -r '.port // 587')
+    user=$(echo "$_sj" | jq -r '.user // ""')
+    pass=$(echo "$_sj" | jq -r '.password // ""')
+    from=$(echo "$_sj" | jq -r '.from // ""')
+    tls=$(echo "$_sj" | jq -r '.tls // true')
     # Port 465: implicit TLS, no STARTTLS. Port 587: use STARTTLS.
     [[ "$port" == "465" ]] && starttls="off" || starttls="on"
 
@@ -59,14 +60,15 @@ _smtp_configure() {
     local host="" port="587" user="" pass="" from="" to="" tls="true" enabled="true"
 
     if [[ -f "$SMTP_CFG" ]]; then
-        host=$(jq -r '.host // ""' "$SMTP_CFG")
-        port=$(jq -r '.port // "587"' "$SMTP_CFG")
-        user=$(jq -r '.user // ""' "$SMTP_CFG")
-        pass=$(jq -r '.password // ""' "$SMTP_CFG")
-        from=$(jq -r '.from // ""' "$SMTP_CFG")
-        to=$(jq -r '.to // ""' "$SMTP_CFG")
-        tls=$(jq -r '.tls // true' "$SMTP_CFG")
-        enabled=$(jq -r '.enabled // true' "$SMTP_CFG")
+        local _sj; _sj=$(vault_read smtp.json)
+        host=$(echo "$_sj" | jq -r '.host // ""')
+        port=$(echo "$_sj" | jq -r '.port // "587"')
+        user=$(echo "$_sj" | jq -r '.user // ""')
+        pass=$(echo "$_sj" | jq -r '.password // ""')
+        from=$(echo "$_sj" | jq -r '.from // ""')
+        to=$(echo "$_sj" | jq -r '.to // ""')
+        tls=$(echo "$_sj" | jq -r '.tls // true')
+        enabled=$(echo "$_sj" | jq -r '.enabled // true')
     fi
 
     echo -e "\n${BOLD}SMTP — Email notifications for Cipi errors${NC}"
@@ -87,8 +89,7 @@ _smtp_configure() {
         --arg h "$host" --arg p "$port" --arg u "$user" --arg s "$pass" \
         --arg f "$from" --arg t "$to" --arg tl "$tls" --argjson e "$([[ "$enabled" == "true" ]] && echo true || echo false)" \
         '{host:$h,port:$p,user:$u,password:$s,from:$f,to:$t,tls:($tl=="true"),enabled:$e}' \
-        > "$SMTP_CFG"
-    chmod 600 "$SMTP_CFG"
+        | vault_write smtp.json
 
     _smtp_write_rc || { error "Failed to write msmtp config"; exit 1; }
 
@@ -104,21 +105,19 @@ _smtp_send() {
     local subject="$1" body="$2"
     [[ ! -f "$SMTP_CFG" ]] && return 1
     _smtp_is_enabled || return 1
-    local to; to=$(jq -r '.to // empty' "$SMTP_CFG")
+    local _sj; _sj=$(vault_read smtp.json)
+    local to; to=$(echo "$_sj" | jq -r '.to // empty')
     [[ -z "$to" ]] && return 1
     _smtp_write_rc || return 1
 
-    local from; from=$(jq -r '.from // "noreply@localhost"' "$SMTP_CFG")
+    local from; from=$(echo "$_sj" | jq -r '.from // "noreply@localhost"')
     printf "From: %s\nTo: %s\nSubject: %s\n\n%s\n" "$from" "$to" "$subject" "$body" | \
         msmtp -C "$SMTP_RC" "$to" 2>/dev/null
 }
 
 _smtp_disable() {
     if [[ -f "$SMTP_CFG" ]]; then
-        local tmp; tmp=$(mktemp)
-        jq '.enabled = false' "$SMTP_CFG" > "$tmp"
-        mv "$tmp" "$SMTP_CFG"
-        chmod 600 "$SMTP_CFG"
+        vault_read smtp.json | jq '.enabled = false' | vault_write smtp.json
         success "Email notifications disabled"
     else
         warn "SMTP not configured. Run: cipi smtp configure"
@@ -127,10 +126,7 @@ _smtp_disable() {
 
 _smtp_enable() {
     if [[ -f "$SMTP_CFG" ]]; then
-        local tmp; tmp=$(mktemp)
-        jq '.enabled = true' "$SMTP_CFG" > "$tmp"
-        mv "$tmp" "$SMTP_CFG"
-        chmod 600 "$SMTP_CFG"
+        vault_read smtp.json | jq '.enabled = true' | vault_write smtp.json
         success "Email notifications enabled"
     else
         error "SMTP not configured. Run: cipi smtp configure"
@@ -155,10 +151,11 @@ _smtp_status() {
         return
     fi
 
+    local _sj; _sj=$(vault_read smtp.json)
     local enabled to host
-    enabled=$(jq -r '.enabled // false' "$SMTP_CFG")
-    to=$(jq -r '.to // ""' "$SMTP_CFG")
-    host=$(jq -r '.host // ""' "$SMTP_CFG")
+    enabled=$(echo "$_sj" | jq -r '.enabled // false')
+    to=$(echo "$_sj" | jq -r '.to // ""')
+    host=$(echo "$_sj" | jq -r '.host // ""')
 
     if [[ "$enabled" == "true" ]]; then
         echo -e "  Status:    ${GREEN}enabled${NC}"

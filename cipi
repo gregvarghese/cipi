@@ -184,7 +184,7 @@ show_status() {
     done
 
     local count=0
-    [[ -f "${CIPI_CONFIG}/apps.json" ]] && count=$(jq 'length' "${CIPI_CONFIG}/apps.json" 2>/dev/null || echo 0)
+    [[ -f "${CIPI_CONFIG}/apps.json" ]] && count=$(vault_read apps.json | jq 'length' 2>/dev/null || echo 0)
     echo -e "\n${BOLD}Apps:${NC} ${CYAN}${count}${NC}\n"
 }
 
