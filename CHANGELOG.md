@@ -47,6 +47,21 @@ All notable changes to Cipi are documented in this file.
 
 ---
 
+## [4.1.1] — 2026-03-06
+
+### Added
+
+- **Security auth notifications** — email alerts on sudo elevation and privileged SSH logins (requires SMTP configured):
+  - **Sudo**: notifies when any user successfully elevates to root via `sudo`, including who ran it and from which TTY
+  - **SSH login**: notifies when `root` or any sudoer logs in via SSH, including source IP
+  - Integrated via PAM (`pam_exec.so`); runs asynchronously to avoid login delays; fails silently if SMTP is not configured
+
+### Fixed
+
+- **Vault readonly guard** — `vault.sh` could crash with `readonly variable` error when sourced multiple times in the same shell (e.g. during PAM hooks or nested cipi calls)
+
+---
+
 ## [4.0.8] — 2026-03-06
 
 ### Security

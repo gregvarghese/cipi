@@ -3,8 +3,8 @@
 # Cipi — Vault (AES-256-CBC config encryption at rest)
 #############################################
 
-readonly VAULT_KEY="${CIPI_CONFIG}/.vault_key"
-readonly VAULT_CIPHER="aes-256-cbc"
+[[ -z "${VAULT_KEY:-}" ]]    && readonly VAULT_KEY="${CIPI_CONFIG}/.vault_key"
+[[ -z "${VAULT_CIPHER:-}" ]] && readonly VAULT_CIPHER="aes-256-cbc"
 
 vault_init() {
     [[ -f "$VAULT_KEY" ]] && return 0
