@@ -35,9 +35,12 @@ api_setup() {
     ensure_apps_json_api_access
     success "apps.json readable by API"
 
-    # Update APP_URL in Laravel .env
+    # Update APP_URL and CIPI_APPS_JSON in Laravel .env
     if [[ -f "${CIPI_API_ROOT}/.env" ]]; then
         sed -i "s|^APP_URL=.*|APP_URL=https://${domain}|" "${CIPI_API_ROOT}/.env"
+        grep -q '^CIPI_APPS_JSON=' "${CIPI_API_ROOT}/.env" 2>/dev/null \
+            && sed -i "s|^CIPI_APPS_JSON=.*|CIPI_APPS_JSON=${CIPI_CONFIG}/apps-public.json|" "${CIPI_API_ROOT}/.env" \
+            || echo "CIPI_APPS_JSON=${CIPI_CONFIG}/apps-public.json" >> "${CIPI_API_ROOT}/.env"
     fi
 
     # PHP-FPM pool for API
@@ -100,6 +103,9 @@ _api_ensure_laravel_app() {
         sed -i "s|^APP_ENV=.*|APP_ENV=production|" /tmp/cipi-api-build/.env
         sed -i "s|^APP_DEBUG=.*|APP_DEBUG=false|" /tmp/cipi-api-build/.env
         sed -i "s|^QUEUE_CONNECTION=.*|QUEUE_CONNECTION=database|" /tmp/cipi-api-build/.env
+        grep -q '^CIPI_APPS_JSON=' /tmp/cipi-api-build/.env 2>/dev/null \
+            && sed -i "s|^CIPI_APPS_JSON=.*|CIPI_APPS_JSON=${CIPI_CONFIG}/apps-public.json|" /tmp/cipi-api-build/.env \
+            || echo "CIPI_APPS_JSON=${CIPI_CONFIG}/apps-public.json" >> /tmp/cipi-api-build/.env
 
         # 4. Publish assets and run setup
         (cd /tmp/cipi-api-build && php artisan vendor:publish --tag=cipi-assets --force 2>/dev/null) || true

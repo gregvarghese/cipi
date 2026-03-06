@@ -58,7 +58,7 @@ MSMTP
 
 _smtp_configure() {
     _smtp_ensure_msmtp
-    local host="" port="587" user="" pass="" from="" to="" tls="true" enabled="true"
+    local host="" port="587" user="" pass="" from="" to="" tls="on" enabled="on"
 
     if [[ -f "$SMTP_CFG" ]]; then
         local _sj; _sj=$(vault_read smtp.json)
@@ -68,8 +68,8 @@ _smtp_configure() {
         pass=$(echo "$_sj" | jq -r '.password // ""')
         from=$(echo "$_sj" | jq -r '.from // ""')
         to=$(echo "$_sj" | jq -r '.to // ""')
-        tls=$(echo "$_sj" | jq -r '.tls // true')
-        enabled=$(echo "$_sj" | jq -r '.enabled // true')
+        [[ "$(echo "$_sj" | jq -r '.tls // true')" == "true" ]] && tls="on" || tls="off"
+        [[ "$(echo "$_sj" | jq -r '.enabled // true')" == "true" ]] && enabled="on" || enabled="off"
     fi
 
     echo -e "\n${BOLD}SMTP — Email notifications for Cipi errors${NC}"
@@ -81,15 +81,16 @@ _smtp_configure() {
     read_input "SMTP password" "$pass" pass
     read_input "From address (e.g. noreply@yourdomain.com)" "$from" from
     read_input "Notification recipient (To)" "$to" to
-    echo -e "  ${DIM}Use TLS? (recommended for 587)${NC}"
-    read_input "TLS (true/false)" "$tls" tls
+    echo -e "  ${DIM}Use TLS? (recommended for port 587)${NC}"
+    read_input "TLS (on/off)" "$tls" tls
     echo -e "  ${DIM}Enable notifications?${NC}"
-    read_input "Enabled (true/false)" "$enabled" enabled
+    read_input "Enabled (on/off)" "$enabled" enabled
 
     jq -n \
         --arg h "$host" --arg p "$port" --arg u "$user" --arg s "$pass" \
-        --arg f "$from" --arg t "$to" --arg tl "$tls" --argjson e "$([[ "$enabled" == "true" ]] && echo true || echo false)" \
-        '{host:$h,port:$p,user:$u,password:$s,from:$f,to:$t,tls:($tl=="true"),enabled:$e}' \
+        --arg f "$from" --arg t "$to" --argjson tl "$([[ "$tls" == "on" ]] && echo true || echo false)" \
+        --argjson e "$([[ "$enabled" == "on" ]] && echo true || echo false)" \
+        '{host:$h,port:$p,user:$u,password:$s,from:$f,to:$t,tls:$tl,enabled:$e}' \
         | vault_write smtp.json
 
     _smtp_write_rc || { error "Failed to write msmtp config"; exit 1; }
