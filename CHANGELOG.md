@@ -12,11 +12,16 @@ All notable changes to Cipi are documented in this file.
 - **Random root password** — installer generates a 32-character random root password, saves it in server.json, and displays it in the final summary
 - **SSH key setup instructions** — clearer installer prompt: shows accepted key formats (ssh-rsa, ssh-ed25519, ecdsa) for existing keys, and RSA 4096 generation command for new keys
 
+### Security
+
+- **`su` restricted to sudo group** — application users can no longer use `su` to elevate to root or cipi (via `pam_wheel.so group=sudo`)
+
 ### Fixed
 
 - **SSH key paste in `curl | bash`** — `read` now reads from `/dev/tty` so interactive input works when setup is piped via curl
 - **SSH key sanitization** — automatically strips comments, carriage returns, and extra whitespace from pasted keys before validation
 - **SSH service restart on Ubuntu 24.04** — use `ssh` service name with `sshd` fallback for compatibility across distributions
+- **server.json missing during SSH hardening** — installer now creates `/etc/cipi/server.json` before writing to it, and MariaDB setup merges instead of overwriting
 
 ---
 

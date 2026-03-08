@@ -536,10 +536,14 @@ CNFEOF
     systemctl restart mariadb
     systemctl enable mariadb
 
-    # Save config
+    # Save config (merge with existing server.json to preserve root_password)
     mkdir -p /etc/cipi
     chmod 700 /etc/cipi
-    echo "{\"db_root_password\": \"${DB_ROOT_PASS}\"}" > /etc/cipi/server.json
+    [ -f /etc/cipi/server.json ] || echo '{}' > /etc/cipi/server.json
+    local tmp
+    tmp=$(mktemp)
+    jq --arg p "$DB_ROOT_PASS" '. + {db_root_password: $p}' /etc/cipi/server.json > "$tmp"
+    mv "$tmp" /etc/cipi/server.json
     chmod 600 /etc/cipi/server.json
 
     echo -e "${GREEN}✓ MariaDB 11.4 (buffer_pool: ${BUFFER_POOL})${NC}"
@@ -777,6 +781,13 @@ install_cipi() {
 # ── PAM AUTH NOTIFICATIONS ────────────────────────────────────
 
 setup_pam() {
+    # Restrict su to sudo group members only (blocks app users from su to root/cipi)
+    if ! grep -q '^auth\s\+required\s\+pam_wheel\.so' /etc/pam.d/su 2>/dev/null; then
+        sed -i '/^#.*pam_wheel\.so/c\auth       required   pam_wheel.so group=sudo' /etc/pam.d/su \
+            || echo 'auth       required   pam_wheel.so group=sudo' >> /etc/pam.d/su
+    fi
+    echo -e "${GREEN}✓ su restricted to sudo group${NC}"
+
     if [[ -x /usr/local/bin/cipi-auth-notify ]]; then
         if ! grep -q 'cipi-auth-notify' /etc/pam.d/sudo 2>/dev/null; then
             echo 'session optional pam_exec.so seteuid /usr/local/bin/cipi-auth-notify' >> /etc/pam.d/sudo
