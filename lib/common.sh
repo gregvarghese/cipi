@@ -16,7 +16,7 @@ log_action() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "${CIPI_LOG}/cipi.log"
 }
 
-generate_password() { openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c "${1:-32}"; }
+generate_password() { openssl rand -base64 64 | tr -dc 'a-zA-Z0-9' | head -c "${1:-40}"; }
 generate_token()    { openssl rand -hex 32; }
 generate_app_key()  { echo "base64:$(openssl rand -base64 32)"; }
 

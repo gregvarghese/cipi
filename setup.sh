@@ -209,7 +209,7 @@ setup_ssh() {
 
     # 1. Set root password (32 chars, random)
     local ROOT_PASS
-    ROOT_PASS=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c 32)
+    ROOT_PASS=$(openssl rand -base64 64 | tr -dc 'a-zA-Z0-9' | head -c 40)
     echo "root:${ROOT_PASS}" | chpasswd
 
     # Save root password in server.json (create if missing)
@@ -223,7 +223,7 @@ setup_ssh() {
 
     # 2. Create cipi user
     local CIPI_PASS
-    CIPI_PASS=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c 32)
+    CIPI_PASS=$(openssl rand -base64 64 | tr -dc 'a-zA-Z0-9' | head -c 40)
     useradd -m -s /bin/bash cipi 2>/dev/null || true
     echo "cipi:${CIPI_PASS}" | chpasswd
     usermod -aG sudo cipi
@@ -349,13 +349,7 @@ server {
 
     # All requests serve the Server Up page (no 404 leaks)
     location / {
-        try_files /index.html /index.html;
-    }
-
-    # Custom error pages — always return the Server Up page
-    error_page 400 401 403 404 405 408 500 502 503 504 /index.html;
-    location = /index.html {
-        internal;
+        rewrite ^ /index.html break;
     }
 }
 EOF
@@ -502,7 +496,7 @@ install_mariadb() {
 
     # Generate root password
     local DB_ROOT_PASS
-    DB_ROOT_PASS=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c 32)
+    DB_ROOT_PASS=$(openssl rand -base64 64 | tr -dc 'a-zA-Z0-9' | head -c 40)
 
     # Secure installation
     mysql <<SQL
@@ -561,7 +555,7 @@ install_redis() {
 
     # Generate password
     local REDIS_PASS
-    REDIS_PASS=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | head -c 32)
+    REDIS_PASS=$(openssl rand -base64 64 | tr -dc 'a-zA-Z0-9' | head -c 40)
 
     # Configure requirepass and bind to localhost
     if grep -q "^# *requirepass" /etc/redis/redis.conf; then

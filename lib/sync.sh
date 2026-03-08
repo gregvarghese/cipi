@@ -486,7 +486,7 @@ _sync_create_app() {
 
     # 1. Linux user
     step "User..."
-    local user_pass; user_pass=$(generate_password 32)
+    local user_pass; user_pass=$(generate_password 40)
     useradd -m -s /bin/bash -G www-data "$app"
     echo "${app}:${user_pass}" | chpasswd
     chmod 750 "$home"
@@ -527,7 +527,7 @@ BASH
 
     # 4. Database
     step "Database..."
-    local db_pass; db_pass=$(generate_password 24)
+    local db_pass; db_pass=$(generate_password 40)
     mariadb -u root -p"$dbr" <<SQL
 CREATE DATABASE IF NOT EXISTS \`${app}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${app}'@'localhost' IDENTIFIED BY '${db_pass}';

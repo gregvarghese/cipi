@@ -4,6 +4,27 @@ All notable changes to Cipi are documented in this file.
 
 ---
 
+## [4.2.2] — 2026-03-08
+
+### Fixed
+
+- **Nginx default host 404** — requests to unconfigured domains (e.g. server IP with random paths) now always serve the "Server Up" page instead of the default nginx 404 error; uses `rewrite` instead of `try_files` for reliable catch-all behavior
+
+### Changed
+
+- **PAM auth notifications** — now include SSH key fingerprint/comment for both sudo and SSH login alerts; key is resolved via `ExposeAuthInfo` + `SSH_USER_AUTH`
+
+### Added
+
+- **App lifecycle notifications** — email alerts on app create, edit, and delete; includes server hostname, app name, domain, PHP version, and change details; sensitive data (passwords, tokens, keys) is never included
+- **`cipi app reset-password <app>`** — regenerate the SSH password for an app's Linux user; displays new password once and sends email notification
+- **`cipi app reset-db-password <app>`** — regenerate the MariaDB password for an app user; automatically updates `DB_PASSWORD` in the app's `.env` file
+- **`cipi reset root-password`** — regenerate the root SSH password and update `server.json` in the vault
+- **`cipi reset db-password`** — regenerate the MariaDB root password and update `server.json` in the vault
+- **`cipi reset redis-password`** — regenerate the Redis password, restart Redis, and update `server.json` in the vault; warns about updating app `.env` files
+
+---
+
 ## [4.2.1] — 2026-03-08
 
 ### Added
@@ -76,6 +97,10 @@ All notable changes to Cipi are documented in this file.
   - Detection via kernel `loginuid` (primary) with process-tree inspection fallback (php-fpm, artisan queue, supervisord, cipi-queue)
 - **Auth notifications: resolve "User: unknown"** — the `SUDO_USER` field in sudo alerts now correctly resolves the calling user via `loginuid` when the PAM environment does not propagate `$SUDO_USER`
 
+### Fixed
+
+- **Vault readonly guard** — `vault.sh` could crash with `readonly variable` error when sourced multiple times in the same shell (e.g. during PAM hooks or nested cipi calls)
+
 ---
 
 ## [4.1.0] — 2026-03-06
@@ -107,21 +132,6 @@ All notable changes to Cipi are documented in this file.
   - **Application logs** (Laravel, PHP-FPM, workers, deploy, Cipi system) — **12 months**
   - **Security logs** (fail2ban, UFW firewall, auth) — **12 months**
   - **HTTP / Navigation logs** (nginx access & error) — **90 days**
-
----
-
-## [4.1.1] — 2026-03-06
-
-### Added
-
-- **Security auth notifications** — email alerts on sudo elevation and privileged SSH logins (requires SMTP configured):
-  - **Sudo**: notifies when any user successfully elevates to root via `sudo`, including who ran it and from which TTY
-  - **SSH login**: notifies when `root` or any sudoer logs in via SSH, including source IP
-  - Integrated via PAM (`pam_exec.so`); runs asynchronously to avoid login delays; fails silently if SMTP is not configured
-
-### Fixed
-
-- **Vault readonly guard** — `vault.sh` could crash with `readonly variable` error when sourced multiple times in the same shell (e.g. during PAM hooks or nested cipi calls)
 
 ---
 

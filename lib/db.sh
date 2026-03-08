@@ -23,7 +23,7 @@ _db_create() {
     [[ -z "$name" ]] && { error "Name required"; exit 1; }
     [[ ! "$name" =~ ^[a-z][a-z0-9_]{1,63}$ ]] && { error "Invalid name"; exit 1; }
     [[ -z "$user" ]] && user="$name"
-    local pass; pass=$(generate_password 32)
+    local pass; pass=$(generate_password 40)
     local dbr; dbr=$(get_db_root_password)
     mariadb -u root -p"$dbr" <<SQL
 CREATE DATABASE IF NOT EXISTS \`${name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -88,7 +88,7 @@ _db_password() {
     local name="${1:-}"; [[ -z "$name" ]] && { error "Usage: cipi db password <name>"; exit 1; }
     local dbr; dbr=$(get_db_root_password)
     local u; u=$(vault_read databases.json | jq -r --arg n "$name" '.[$n].user//$n' 2>/dev/null)
-    local np; np=$(generate_password 32)
+    local np; np=$(generate_password 40)
     mariadb -u root -p"$dbr" -e "ALTER USER '${u}'@'localhost' IDENTIFIED BY '${np}'; FLUSH PRIVILEGES;" 2>/dev/null
     echo -e "\n${GREEN}✓${NC} New password for '${u}': ${CYAN}${np}${NC}"
     echo -e "${YELLOW}Update DB_PASSWORD in your .env!${NC}\n"

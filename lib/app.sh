@@ -29,8 +29,8 @@ app_create() {
     echo ""; info "Creating '${app_user}'..."; echo ""
 
     local user_pass db_pass webhook_token app_key home
-    user_pass=$(generate_password 32)
-    db_pass=$(generate_password 24)
+    user_pass=$(generate_password 40)
+    db_pass=$(generate_password 40)
     webhook_token=$(generate_token)
     app_key=$(generate_app_key)
     home="/home/${app_user}"
@@ -153,6 +153,11 @@ JSON
         git_save_app_data "$app_user" "$GIT_PROVIDER" "${GIT_DEPLOY_KEY_ID:-}" "${GIT_WEBHOOK_ID:-}"
     fi
     log_action "APP CREATED: $app_user domain=$domain php=$php_ver"
+
+    # Email notification
+    cipi_notify \
+        "Cipi app created: ${app_user} on $(hostname)" \
+        "A new app was created.\n\nServer: $(hostname)\nApp: ${app_user}\nDomain: ${domain}\nPHP: ${php_ver}\nBranch: ${branch}\nRepository: ${repository}\nTime: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 
     # 9. Supervisor default worker
     step "Queue worker..."
@@ -330,7 +335,18 @@ app_edit() {
         success "Repository updated"; changed=true
     fi
     [[ "$changed" == false ]] && info "Nothing changed. Use --php, --branch, or --repository"
-    [[ "$changed" == true ]] && log_action "APP EDITED: $app $*"
+    if [[ "$changed" == true ]]; then
+        log_action "APP EDITED: $app $*"
+
+        # Email notification
+        local edit_details=""
+        [[ -n "${ARG_php:-}" ]] && edit_details="${edit_details}PHP: ${cur_php} → ${ARG_php}\n"
+        [[ -n "${ARG_branch:-}" ]] && edit_details="${edit_details}Branch: ${ARG_branch}\n"
+        [[ -n "${ARG_repository:-}" ]] && edit_details="${edit_details}Repository: ${ARG_repository}\n"
+        cipi_notify \
+            "Cipi app modified: ${app} on $(hostname)" \
+            "An app was modified.\n\nServer: $(hostname)\nApp: ${app}\nDomain: $(app_get "$app" domain)\n\nChanges:\n${edit_details}\nTime: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+    fi
 }
 
 # ── DELETE ────────────────────────────────────────────────────
@@ -365,6 +381,12 @@ app_delete() {
     step "Config...";      app_remove "$app"
 
     log_action "APP DELETED: $app"
+
+    # Email notification
+    cipi_notify \
+        "Cipi app deleted: ${app} on $(hostname)" \
+        "An app was deleted.\n\nServer: $(hostname)\nApp: ${app}\nDomain: ${d}\nPHP: ${p}\nTime: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+
     echo ""; success "'${app}' deleted"; echo ""
 }
 
@@ -643,6 +665,66 @@ auth_delete() {
     success "auth.json deleted for '${app}'"
 }
 
+# ── RESET PASSWORDS ───────────────────────────────────────────
+
+app_reset_password() {
+    local app="${1:-}"; [[ -z "$app" ]] && { error "Usage: cipi app reset-password <app>"; exit 1; }
+    app_exists "$app" || { error "App '$app' not found"; exit 1; }
+    id "$app" &>/dev/null || { error "System user '$app' not found"; exit 1; }
+
+    local new_pass
+    new_pass=$(generate_password 40)
+    echo "${app}:${new_pass}" | chpasswd
+
+    log_action "APP SSH PASSWORD RESET: $app"
+
+    cipi_notify \
+        "Cipi app SSH password reset: ${app} on $(hostname)" \
+        "The SSH password for app '${app}' was regenerated.\n\nServer: $(hostname)\nApp: ${app}\nTime: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+
+    echo ""
+    echo -e "${GREEN}✓${NC} New SSH password for '${app}': ${CYAN}${new_pass}${NC}"
+    echo -e "${YELLOW}${BOLD}⚠ SAVE THIS PASSWORD — shown only once${NC}"
+    echo ""
+}
+
+app_reset_db_password() {
+    local app="${1:-}"; [[ -z "$app" ]] && { error "Usage: cipi app reset-db-password <app>"; exit 1; }
+    app_exists "$app" || { error "App '$app' not found"; exit 1; }
+
+    local new_pass dbr
+    new_pass=$(generate_password 40)
+    dbr=$(get_db_root_password)
+
+    mariadb -u root -p"${dbr}" <<SQL
+ALTER USER '${app}'@'localhost' IDENTIFIED BY '${new_pass}';
+ALTER USER '${app}'@'127.0.0.1' IDENTIFIED BY '${new_pass}';
+FLUSH PRIVILEGES;
+SQL
+
+    # Update .env if it exists
+    local env_file="/home/${app}/shared/.env"
+    if [[ -f "$env_file" ]]; then
+        sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=${new_pass}|" "$env_file"
+        chown "${app}:${app}" "$env_file"
+        chmod 640 "$env_file"
+        info ".env updated with new DB password"
+    else
+        warn "Update DB_PASSWORD in your .env manually!"
+    fi
+
+    log_action "APP DB PASSWORD RESET: $app"
+
+    cipi_notify \
+        "Cipi app DB password reset: ${app} on $(hostname)" \
+        "The database password for app '${app}' was regenerated.\n\nServer: $(hostname)\nApp: ${app}\nTime: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+
+    echo ""
+    echo -e "${GREEN}✓${NC} New DB password for '${app}': ${CYAN}${new_pass}${NC}"
+    echo -e "${YELLOW}${BOLD}⚠ SAVE THIS PASSWORD — shown only once${NC}"
+    echo ""
+}
+
 # ── ROUTERS ───────────────────────────────────────────────────
 
 app_command() {
@@ -657,7 +739,9 @@ app_command() {
         logs)    app_logs "$@" ;;
         tinker)  app_tinker "$@" ;;
         artisan) app_artisan "$@" ;;
-        *) error "Unknown: $sub"; echo "Use: create list show edit delete env logs tinker artisan"; exit 1 ;;
+        reset-password)    app_reset_password "$@" ;;
+        reset-db-password) app_reset_db_password "$@" ;;
+        *) error "Unknown: $sub"; echo "Use: create list show edit delete env logs tinker artisan reset-password reset-db-password"; exit 1 ;;
     esac
 }
 
