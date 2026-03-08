@@ -4,6 +4,7 @@
 # - Fix default nginx host to always serve index.html
 # - Install PAM auth notifications (sudo & SSH)
 # - Fix cipi ssh list/remove silent exit (set -e + arithmetic)
+# - SSH access groups (app users can SSH with password)
 #############################################
 
 set -e
@@ -69,3 +70,43 @@ SUDOEOF
 chmod 440 /etc/sudoers.d/cipi-api
 
 echo "www-data sudoers restricted to API whitelist"
+
+# ── SSH access groups + password auth for app users ──────────
+
+echo "Setting up SSH access groups..."
+
+SSHD="/etc/ssh/sshd_config"
+
+groupadd -f cipi-ssh
+groupadd -f cipi-apps
+usermod -aG cipi-ssh cipi
+
+# Add existing app users to cipi-apps
+if [[ -f /etc/cipi/apps.json ]]; then
+    for app in $(jq -r 'keys[]' /etc/cipi/apps.json 2>/dev/null); do
+        if id "$app" &>/dev/null; then
+            usermod -aG cipi-apps "$app"
+            echo "  Added ${app} to cipi-apps"
+        fi
+    done
+fi
+
+# Replace AllowUsers with AllowGroups
+sed -i '/^AllowUsers/d' "$SSHD"
+if grep -qE "^#?\s*AllowGroups\b" "$SSHD"; then
+    sed -i "s/^#*\s*AllowGroups\b.*/AllowGroups cipi-ssh cipi-apps/" "$SSHD"
+else
+    echo "AllowGroups cipi-ssh cipi-apps" >> "$SSHD"
+fi
+
+# Add Match block for app users (password auth)
+if ! grep -q 'Match Group cipi-apps' "$SSHD"; then
+    cat >> "$SSHD" <<'MATCHEOF'
+
+Match Group cipi-apps
+    PasswordAuthentication yes
+MATCHEOF
+fi
+
+systemctl restart ssh || systemctl restart sshd
+echo "SSH access groups configured (app users can now SSH with password)"

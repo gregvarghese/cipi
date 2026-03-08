@@ -226,6 +226,11 @@ setup_ssh() {
     echo "cipi:${CIPI_PASS}" | chpasswd
     usermod -aG sudo cipi
 
+    # SSH access groups
+    groupadd -f cipi-ssh
+    groupadd -f cipi-apps
+    usermod -aG cipi-ssh cipi
+
     # 2. Setup user SSH key (owner's key for interactive login)
     mkdir -p /home/cipi/.ssh
     echo "$SSH_PUBKEY" > /home/cipi/.ssh/authorized_keys
@@ -261,7 +266,7 @@ SUDOEOF
         [MaxAuthTries]="3"
         [LoginGraceTime]="20"
         [X11Forwarding]="no"
-        [AllowUsers]="cipi"
+        [AllowGroups]="cipi-ssh cipi-apps"
         [ExposeAuthInfo]="yes"
     )
 
@@ -274,10 +279,22 @@ SUDOEOF
         fi
     done
 
+    # Remove legacy AllowUsers if present (replaced by AllowGroups)
+    sed -i '/^AllowUsers/d' "$SSHD"
+
+    # Allow password auth for app users only (cipi stays key-only)
+    if ! grep -q 'Match Group cipi-apps' "$SSHD"; then
+        cat >> "$SSHD" <<'MATCHEOF'
+
+Match Group cipi-apps
+    PasswordAuthentication yes
+MATCHEOF
+    fi
+
     # 6. Restart SSH
     systemctl restart ssh || systemctl restart sshd
 
-    echo -e "${GREEN}✓ SSH hardened (key-only, cipi user)${NC}"
+    echo -e "${GREEN}✓ SSH hardened (key-only for cipi, password for app users)${NC}"
 }
 
 # ── NGINX ─────────────────────────────────────────────────────

@@ -37,7 +37,7 @@ app_create() {
 
     # 1. Linux user
     step "Creating user..."
-    useradd -m -s /bin/bash -G www-data "$app_user"
+    useradd -m -s /bin/bash -G www-data,cipi-apps "$app_user"
     echo "${app_user}:${user_pass}" | chpasswd
     chmod 750 "$home"
     usermod -aG "$app_user" www-data

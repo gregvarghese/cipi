@@ -15,6 +15,7 @@ All notable changes to Cipi are documented in this file.
 ### Changed
 
 - **PAM auth notifications** — now include SSH key fingerprint/comment for both sudo and SSH login alerts; key is resolved via `ExposeAuthInfo` + `SSH_USER_AUTH`
+- **SSH access model** — replaced `AllowUsers cipi` with group-based access (`AllowGroups cipi-ssh cipi-apps`); `cipi` user remains key-only; app users can now SSH directly with username and password via `Match Group cipi-apps` block that enables `PasswordAuthentication` selectively
 
 ### Added
 
@@ -25,10 +26,6 @@ All notable changes to Cipi are documented in this file.
 - **`cipi reset db-password`** — regenerate the MariaDB root password and update `server.json` in the vault
 - **`cipi reset redis-password`** — regenerate the Redis password, restart Redis, and update `server.json` in the vault; warns about updating app `.env` files
 - **`cipi ssh rename [number] [name]`** — set or change the display name of an SSH key; updates the comment field in `authorized_keys`; interactive selection if called without arguments
-
-### Notes
-
-- **App user SSH access** — application Linux users cannot log in directly via SSH; connect as `cipi` first, then switch user with `su - <username>`
 
 ### Security
 
