@@ -93,9 +93,9 @@ _api_ensure_laravel_app() {
         [[ -d "${CIPI_LIB}/../cipi-api" ]] && pkg_dir="${CIPI_LIB}/../cipi-api"
         if [[ -d "$pkg_dir" ]]; then
             (cd /tmp/cipi-api-build && composer config repositories.cipi-api path "$pkg_dir" 2>/dev/null) || true
-            (cd /tmp/cipi-api-build && composer require andreapollastri/cipi-api:@dev --no-interaction 2>/dev/null) || true
+            (cd /tmp/cipi-api-build && composer require cipi/api:@dev --no-interaction 2>/dev/null) || true
         else
-            (cd /tmp/cipi-api-build && composer require andreapollastri/cipi-api --no-interaction 2>/dev/null) || true
+            (cd /tmp/cipi-api-build && composer require cipi/api --no-interaction 2>/dev/null) || true
         fi
         (cd /tmp/cipi-api-build && composer require laravel/mcp --no-interaction 2>/dev/null) || true
 
@@ -137,7 +137,7 @@ _api_update_package() {
     if [[ -d "$pkg_dir" ]]; then
         (cd "${CIPI_API_ROOT}" && composer config repositories.cipi-api path "$pkg_dir" 2>/dev/null) || true
     fi
-    (cd "${CIPI_API_ROOT}" && composer update andreapollastri/cipi-api --no-interaction 2>/dev/null) || true
+    (cd "${CIPI_API_ROOT}" && composer update cipi/api --no-interaction 2>/dev/null) || true
     chown -R www-data:www-data "${CIPI_API_ROOT}" 2>/dev/null || true
     (cd "${CIPI_API_ROOT}" && sudo -u www-data php artisan vendor:publish --tag=cipi-assets --force 2>/dev/null) || true
     (cd "${CIPI_API_ROOT}" && sudo -u www-data php artisan migrate --force 2>/dev/null) || true
@@ -323,9 +323,9 @@ api_upgrade() {
     [[ -d "${CIPI_LIB}/../cipi-api" ]] && pkg_dir="${CIPI_LIB}/../cipi-api"
     if [[ -d "$pkg_dir" ]]; then
         (cd /tmp/cipi-api-build && composer config repositories.cipi-api path "$pkg_dir" 2>/dev/null) || true
-        (cd /tmp/cipi-api-build && composer require andreapollastri/cipi-api:@dev --no-interaction 2>/dev/null) || true
+        (cd /tmp/cipi-api-build && composer require cipi/api:@dev --no-interaction 2>/dev/null) || true
     else
-        (cd /tmp/cipi-api-build && composer require andreapollastri/cipi-api --no-interaction 2>/dev/null) || true
+        (cd /tmp/cipi-api-build && composer require cipi/api --no-interaction 2>/dev/null) || true
     fi
     (cd /tmp/cipi-api-build && composer require laravel/mcp --no-interaction 2>/dev/null) || true
     success "cipi-api package installed"
@@ -424,7 +424,7 @@ api_status() {
 _api_show_versions() {
     local laravel_ver cipi_api_ver
     laravel_ver=$(cd "${CIPI_API_ROOT}" && sudo -u www-data php artisan --version 2>/dev/null | grep -oP '[\d.]+' || echo "unknown")
-    cipi_api_ver=$(cd "${CIPI_API_ROOT}" && composer show andreapollastri/cipi-api 2>/dev/null | grep -oP 'versions\s*:\s*\K.*' || echo "dev")
+    cipi_api_ver=$(cd "${CIPI_API_ROOT}" && composer show cipi/api 2>/dev/null | grep -oP 'versions\s*:\s*\K.*' || echo "dev")
     echo -e "  Laravel:    ${CYAN}${laravel_ver}${NC}"
     echo -e "  cipi-api:   ${CYAN}${cipi_api_ver}${NC}"
 }

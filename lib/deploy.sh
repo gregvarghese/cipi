@@ -214,6 +214,6 @@ _deploy_webhook() {
         echo "    Secret token: ${t}"
     fi
     echo ""
-    echo "  Requires: composer require andreapollastri/cipi-agent"
+    echo "  Requires: composer require cipi/agent"
     echo ""
 }

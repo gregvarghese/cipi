@@ -4,10 +4,10 @@
 The open-source server control panel exclusively for Laravel.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fandreapollastri%2Fcipi%2Flatest%2Fversion.md&query=%24&label=version&color=blue" alt="Version">
+  <img src="https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcipi-sh%2Fcipi%2Flatest%2Fversion.md&query=%24&label=version&color=blue" alt="Version">
   <img src="https://img.shields.io/badge/ubuntu-24.04+-orange" alt="Ubuntu">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-  <img src="https://img.shields.io/github/stars/andreapollastri/cipi?style=social" alt="Stars">
+  <img src="https://img.shields.io/github/stars/cipi-sh/cipi?style=social" alt="Stars">
 </p>
 
 ---

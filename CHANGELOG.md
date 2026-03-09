@@ -4,6 +4,16 @@ All notable changes to Cipi are documented in this file.
 
 ---
 
+## [4.2.5] — 2026-03-09
+
+### Changed
+
+- **GitHub organization migration** — moved repos to [cipi-sh](https://github.com/cipi-sh/) organization; Composer package names updated from `andreapollastri/cipi-api` → `cipi/api` and `andreapollastri/cipi-agent` → `cipi/agent`
+- **Self-update & installer fallback** — `setup.sh` and `self-update.sh` now try `cipi-sh/cipi` first, falling back to `andreapollastri/cipi` for backward compatibility during the main repo transition
+- **Migration 4.2.5** — automatically migrates existing installations: replaces old Composer package in the API app and updates crontab references
+
+---
+
 ## [4.2.4] — 2026-03-09
 
 ### Added

@@ -3,13 +3,15 @@
 # Cipi — Self-Update
 #############################################
 
-readonly _CIPI_REPO="andreapollastri/cipi"
+readonly _CIPI_REPO="cipi-sh/cipi"
+readonly _CIPI_REPO_FALLBACK="andreapollastri/cipi"
 
 selfupdate_command() {
     parse_args "$@"
     local branch="${ARG_branch:-latest}"
     if [[ "${ARG_check:-}" == "true" ]]; then
         local rv; rv=$(curl -fsSL "https://raw.githubusercontent.com/${_CIPI_REPO}/refs/heads/${branch}/version.md" 2>/dev/null | tr -d '[:space:]')
+        [[ -z "$rv" ]] && rv=$(curl -fsSL "https://raw.githubusercontent.com/${_CIPI_REPO_FALLBACK}/refs/heads/${branch}/version.md" 2>/dev/null | tr -d '[:space:]')
         [[ -z "$rv" ]] && { error "Cannot check updates"; exit 1; }
         [[ "$rv" == "$CIPI_VERSION" ]] && success "Up to date (v${CIPI_VERSION})" || info "Update: v${CIPI_VERSION} → v${rv}"
         return
@@ -17,7 +19,9 @@ selfupdate_command() {
 
     step "Downloading from '${branch}'..."
     local tmp="/tmp/cipi-update-$$"; rm -rf "$tmp"
-    git clone -b "$branch" --depth 1 "https://github.com/${_CIPI_REPO}.git" "$tmp" 2>/dev/null || { error "Download failed"; exit 1; }
+    git clone -b "$branch" --depth 1 "https://github.com/${_CIPI_REPO}.git" "$tmp" 2>/dev/null \
+        || git clone -b "$branch" --depth 1 "https://github.com/${_CIPI_REPO_FALLBACK}.git" "$tmp" 2>/dev/null \
+        || { error "Download failed"; exit 1; }
     local nv; nv=$(tr -d '[:space:]' < "${tmp}/version.md" 2>/dev/null)
     [[ -z "$nv" ]] && { error "Invalid package (version.md missing)"; rm -rf "$tmp"; exit 1; }
     info "Updating v${CIPI_VERSION} → v${nv}"
@@ -45,7 +49,7 @@ selfupdate_command() {
         step "Updating cipi-api in Laravel app..."
         local api_root="${CIPI_API_ROOT:-/opt/cipi/api}"
         (cd "$api_root" && composer config repositories.cipi-api path /opt/cipi/cipi-api 2>/dev/null) || true
-        (cd "$api_root" && composer update andreapollastri/cipi-api --no-interaction 2>/dev/null) || true
+        (cd "$api_root" && composer update cipi/api --no-interaction 2>/dev/null) || true
         (cd "$api_root" && php artisan vendor:publish --tag=cipi-assets --force 2>/dev/null) || true
         (cd "$api_root" && sudo -u www-data php artisan migrate --force 2>/dev/null) || true
         chown -R www-data:www-data "$api_root"
