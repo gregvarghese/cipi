@@ -26,7 +26,10 @@ TTY="${PAM_TTY:-unknown}"
 
 # ── Helper functions ─────────────────────────────────────────
 
+# Resolve SSH key name for a given login user (who authenticated via SSH).
+# For sudo/su: pass the session user (cipi), not the target (root).
 _resolve_ssh_key_name() {
+    local login_user="${1:-$USER}"
     local fp=""
 
     local auth_file="${SSH_USER_AUTH:-}"
@@ -36,7 +39,7 @@ _resolve_ssh_key_name() {
 
     if [[ -z "$fp" && -f /var/log/auth.log ]]; then
         local log_line
-        log_line=$(grep "Accepted publickey for ${USER} from ${RHOST}" /var/log/auth.log 2>/dev/null | tail -1)
+        log_line=$(grep "Accepted publickey for ${login_user} from ${RHOST}" /var/log/auth.log 2>/dev/null | tail -1)
         [[ -n "$log_line" ]] && fp=$(echo "$log_line" | grep -o 'SHA256:[^ ]*')
     fi
 
@@ -89,22 +92,22 @@ _resolve_sudo_user() {
     echo "unknown"
 }
 
-# ── Resolve context ──────────────────────────────────────────
-
-SSH_KEY_NAME=$(_resolve_ssh_key_name)
-[[ -z "$SSH_KEY_NAME" ]] && SSH_KEY_NAME="unknown"
-
 # ── Build event ──────────────────────────────────────────────
 
 case "$SERVICE" in
     sudo)
         _is_internal && exit 0
         SUDO_BY=$(_resolve_sudo_user)
+        SSH_KEY_NAME=$(_resolve_ssh_key_name "$SUDO_BY")
+        [[ -z "$SSH_KEY_NAME" ]] && SSH_KEY_NAME="unknown"
+        SUDO_CMD="${SUDO_COMMAND:-}"
         SUBJECT="Cipi security: sudo by ${SUDO_BY} (${HOSTNAME})"
         BODY="Sudo elevation detected on ${HOSTNAME}
 
 User:      ${SUDO_BY}
 Target:    ${USER}
+Command:   ${SUDO_CMD:-<interactive>}
+From:      ${RHOST}
 SSH Key:   ${SSH_KEY_NAME}
 TTY:       ${TTY}
 Time:      ${TIMESTAMP}"
@@ -113,6 +116,8 @@ Time:      ${TIMESTAMP}"
         if [[ "$USER" != "root" ]]; then
             id -nG "$USER" 2>/dev/null | grep -qw sudo || exit 0
         fi
+        SSH_KEY_NAME=$(_resolve_ssh_key_name "$USER")
+        [[ -z "$SSH_KEY_NAME" ]] && SSH_KEY_NAME="unknown"
         SUBJECT="Cipi security: SSH login ${USER}@${HOSTNAME}"
         BODY="SSH login detected on ${HOSTNAME}
 
@@ -125,13 +130,15 @@ Time:      ${TIMESTAMP}"
     su)
         _is_internal && exit 0
         SU_BY=$(_resolve_sudo_user)
+        SSH_KEY_NAME=$(_resolve_ssh_key_name "$SU_BY")
+        [[ -z "$SSH_KEY_NAME" ]] && SSH_KEY_NAME="unknown"
         SUBJECT="Cipi security: su to ${USER} by ${SU_BY} (${HOSTNAME})"
         BODY="su elevation detected on ${HOSTNAME}
 
 User:      ${SU_BY}
 Target:    ${USER}
-SSH Key:   ${SSH_KEY_NAME}
 From:      ${RHOST}
+SSH Key:   ${SSH_KEY_NAME}
 TTY:       ${TTY}
 Time:      ${TIMESTAMP}"
         ;;
