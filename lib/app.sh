@@ -171,7 +171,7 @@ JSON
     cat <<CRON | crontab -u "$app_user" -
 # Laravel Scheduler
 * * * * * /usr/bin/php${php_ver} ${home}/current/artisan schedule:run >> /dev/null 2>&1
-# Cipi deploy trigger (written by cipi/agent webhook)
+# Cipi deploy trigger (written by andreapollastri/cipi-agent webhook)
 * * * * * test -f ${home}/.deploy-trigger && rm -f ${home}/.deploy-trigger && cd ${home} && /usr/local/bin/dep deploy -f ${home}/.deployer/deploy.php >> ${home}/logs/deploy.log 2>&1
 CRON
     success "Scheduler + deploy trigger"
@@ -218,7 +218,7 @@ SUDO
         fi
     fi
     echo ""
-    echo -e "  ${BOLD}Next:${NC} composer require cipi/agent  (in your Laravel project)"
+    echo -e "  ${BOLD}Next:${NC} composer require andreapollastri/cipi-agent  (in your Laravel project)"
     echo -e "        cipi deploy ${app_user}"
     echo -e "        cipi ssl install ${app_user}"
     echo ""
@@ -280,7 +280,11 @@ app_show() {
         echo -e "\n  ${BOLD}Release${NC}  ${CYAN}$(readlink -f "/home/${app}/current" | xargs basename)${NC}"
     fi
     echo -e "\n  ${BOLD}Workers${NC}"
-    supervisorctl status "${app}-worker-*" 2>/dev/null | sed 's/^/  /' || echo "  none"
+    if grep -q "\[program:${app}-worker-" "/etc/supervisor/conf.d/${app}.conf" 2>/dev/null; then
+        supervisorctl status "${app}-worker-*" 2>/dev/null | sed 's/^/  /'
+    else
+        echo "  none"
+    fi
     echo ""
 }
 
