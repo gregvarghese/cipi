@@ -5,6 +5,8 @@
 #   sudoers (scoped to own app name only)
 # - cipi-auth-notify: only notify on cipi→root
 #   (handled by updated script via self-update)
+# - Fix cipi binary permissions (755) so app
+#   users can execute it (auto-sudo handles root)
 #############################################
 
 set -e
@@ -30,5 +32,8 @@ for sf in /etc/sudoers.d/cipi-*; do
         echo "  Patched: $(basename "$sf") (added ssl install for ${app})"
     fi
 done
+
+echo "Fixing cipi binary permissions..."
+chmod 755 /usr/local/bin/cipi
 
 echo "Migration 4.2.8 complete"
