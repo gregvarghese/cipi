@@ -6,9 +6,13 @@ All notable changes to Cipi are documented in this file.
 
 ## [4.2.9] — 2026-03-11
 
+### Added
+
+- **`cipi php switch <ver>`** — Switch the system default PHP version used by root/cipi; migrates the API FPM pool, restarts the API queue worker, and sends email notification; `cipi php list` now shows which version is the system default; `cipi php remove` now blocks removing the system default version
+
 ### Fixed
 
-- **Deploy uses wrong PHP version** — Deployer (`dep`) and all deploy-related commands (deploy, rollback, crontab webhook trigger, user shell alias) now run with the app's configured PHP version (`/usr/bin/phpX.Y`) instead of the system default; affects `cipi deploy`, `cipi deploy --rollback`, crontab deploy triggers, `.bashrc` deploy alias, and `cipi sync import` deploys
+- **App commands use wrong PHP version** — Deployer (`dep`), Composer, and all deploy-related commands now run with the app's configured PHP version (`/usr/bin/phpX.Y`) instead of the system default; affects `cipi deploy`, `cipi deploy --rollback`, crontab deploy triggers, `.bashrc` aliases (`deploy`, `composer`), and `cipi sync import` deploys
 
 ---
 

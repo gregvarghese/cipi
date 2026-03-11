@@ -139,6 +139,7 @@ show_help() {
     echo -e "    ${CYAN}cipi ssl renew${NC}                      Renew all certs"
     echo -e "    ${CYAN}cipi php list${NC}                       PHP versions"
     echo -e "    ${CYAN}cipi php install <ver>${NC}               Install PHP"
+    echo -e "    ${CYAN}cipi php switch <ver>${NC}                Switch system default PHP"
     echo -e "    ${CYAN}cipi firewall allow <port>${NC}          Allow port"
     echo -e "    ${CYAN}cipi firewall list${NC}                  Firewall rules"
     echo -e "    ${CYAN}cipi backup configure${NC}               Configure S3"

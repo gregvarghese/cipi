@@ -513,7 +513,7 @@ _sync_create_app() {
 export PATH="/usr/local/bin:\$PATH"
 alias php='/usr/bin/php${php_ver}'
 alias artisan='php ${home}/current/artisan'
-alias composer='/usr/local/bin/composer'
+alias composer='/usr/bin/php${php_ver} /usr/local/bin/composer'
 alias tinker='artisan tinker'
 alias deploy='/usr/bin/php${php_ver} /usr/local/bin/dep deploy -f ${home}/.deployer/deploy.php'
 PS1='\[\033[0;32m\]\u\[\033[0m\]@\h:\[\033[0;34m\]\w\[\033[0m\]\$ '
