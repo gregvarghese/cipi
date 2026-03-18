@@ -425,6 +425,12 @@ app_edit() {
     parse_args "$@"
     local changed=false cur_php; cur_php=$(app_get "$app" php)
 
+    # Always regenerate Nginx vhost (fixes config drift and e.g. custom app redirect-loop fix)
+    step "Refreshing Nginx vhost..."
+    _create_nginx_vhost "$app" "$(app_get "$app" domain)" "$cur_php"
+    reload_nginx
+    success "Nginx vhost updated"
+
     if [[ -n "${ARG_php:-}" ]]; then
         local np="${ARG_php}"
         validate_php_version "$np" || { error "Invalid PHP: $np"; exit 1; }
@@ -718,9 +724,14 @@ server {
     location ~ /\.(?!well-known) { deny all; }
     location = /favicon.ico { access_log off; log_not_found off; }
     location = /robots.txt  { access_log off; log_not_found off; }
-    error_page 404 /${try_files_fb};
-}
 EOF
+        # Only use error_page 404 for static 404.html — avoid loop when fallback is index.php/index.html
+        if [[ "$try_files_fb" == "404.html" ]]; then
+            echo "    error_page 404 /404.html;" >> "/etc/nginx/sites-available/${app}"
+        fi
+        cat >> "/etc/nginx/sites-available/${app}" <<'END'
+}
+END
         else
             cat > "/etc/nginx/sites-available/${app}" <<EOF
 server {
@@ -741,9 +752,11 @@ server {
     location ~ /\.(?!well-known) { deny all; }
     location = /favicon.ico { access_log off; log_not_found off; }
     location = /robots.txt  { access_log off; log_not_found off; }
-    error_page 404 /${try_files_fb};
-}
 EOF
+        if [[ "$try_files_fb" == "404.html" ]]; then
+            echo "    error_page 404 /404.html;" >> "/etc/nginx/sites-available/${app}"
+        fi
+        echo "}" >> "/etc/nginx/sites-available/${app}"
         fi
     else
         cat > "/etc/nginx/sites-available/${app}" <<EOF
