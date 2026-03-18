@@ -425,12 +425,6 @@ app_edit() {
     parse_args "$@"
     local changed=false cur_php; cur_php=$(app_get "$app" php)
 
-    # Always regenerate Nginx vhost (fixes config drift and e.g. custom app redirect-loop fix)
-    step "Refreshing Nginx vhost..."
-    _create_nginx_vhost "$app" "$(app_get "$app" domain)" "$cur_php"
-    reload_nginx
-    success "Nginx vhost updated"
-
     if [[ -n "${ARG_php:-}" ]]; then
         local np="${ARG_php}"
         validate_php_version "$np" || { error "Invalid PHP: $np"; exit 1; }
