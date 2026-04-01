@@ -4,8 +4,9 @@
 #############################################
 
 # When sourced outside the main cipi binary (e.g. migrations), these may be unset.
-CIPI_CONFIG="${CIPI_CONFIG:-/etc/cipi}"
-CIPI_LOG="${CIPI_LOG:-/var/log/cipi}"
+# The main cipi script sets them readonly — use := with : so we never reassign.
+: "${CIPI_CONFIG:=/etc/cipi}"
+: "${CIPI_LOG:=/var/log/cipi}"
 
 source "${CIPI_LIB}/vault.sh"
 
