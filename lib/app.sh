@@ -338,7 +338,7 @@ JSON
 # Laravel Scheduler
 * * * * * /usr/bin/php${php_ver} ${home}/current/artisan schedule:run >> /dev/null 2>&1
 # Cipi deploy trigger (written by cipi/agent webhook)
-* * * * * test -f ${home}/.deploy-trigger && rm -f ${home}/.deploy-trigger && cd ${home} && /usr/bin/php${php_ver} /usr/local/bin/dep deploy -f ${home}/.deployer/deploy.php >> ${home}/logs/deploy.log 2>&1
+* * * * * test -f ${home}/.deploy-trigger && rm -f ${home}/.deploy-trigger && cd ${home} && { /usr/bin/php${php_ver} /usr/local/bin/dep deploy -f ${home}/.deployer/deploy.php >> ${home}/logs/deploy.log 2>&1 || sudo /usr/local/bin/cipi-app-notify ${app_user} deploy \$? ${home}/logs/deploy.log; }
 CRON
         success "Scheduler + deploy trigger"
     fi
@@ -354,6 +354,7 @@ CRON
 ${app_user} ALL=(root) NOPASSWD: /usr/local/bin/cipi-worker restart ${app_user}
 ${app_user} ALL=(root) NOPASSWD: /usr/local/bin/cipi-worker stop ${app_user}
 ${app_user} ALL=(root) NOPASSWD: /usr/local/bin/cipi-worker status ${app_user}
+${app_user} ALL=(root) NOPASSWD: /usr/local/bin/cipi-app-notify ${app_user} *
 SUDO
     chmod 440 "/etc/sudoers.d/cipi-${app_user}"
     success "Permissions"

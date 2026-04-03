@@ -766,10 +766,14 @@ install_cipi() {
     cp cipi-install/lib/cipi-auth-notify.sh /usr/local/bin/cipi-auth-notify
     chmod 700 /usr/local/bin/cipi-auth-notify
 
+    # App-level failure notification (called by app users via sudo)
+    cp cipi-install/lib/cipi-app-notify.sh /usr/local/bin/cipi-app-notify
+    chmod 700 /usr/local/bin/cipi-app-notify
+
     # Templates (if any)
     cp cipi-install/templates/* /opt/cipi/templates/ 2>/dev/null || true
 
-    chown -R root:root /usr/local/bin/cipi /usr/local/bin/cipi-worker /usr/local/bin/cipi-cron-notify /usr/local/bin/cipi-auth-notify /opt/cipi
+    chown -R root:root /usr/local/bin/cipi /usr/local/bin/cipi-worker /usr/local/bin/cipi-cron-notify /usr/local/bin/cipi-auth-notify /usr/local/bin/cipi-app-notify /opt/cipi
 
     # Generate vault key for config encryption
     if [ ! -f /etc/cipi/.vault_key ]; then

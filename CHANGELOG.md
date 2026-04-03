@@ -4,6 +4,14 @@ All notable changes to Cipi are documented in this file.
 
 ---
 
+## [4.4.14] — 2026-04-03
+
+### Fixed
+
+- **SMTP alerts for webhook/cron deploy failures** — Deploys triggered by `.deploy-trigger` (cipi/agent webhook) ran `dep deploy` as the app user with no notification path; only interactive `cipi deploy` called `cipi_notify`. Added **`/usr/local/bin/cipi-app-notify`**, invoked via `sudo` from the deploy-trigger crontab on non-zero exit, which reads `smtp.json` as root and emails the last lines of `logs/deploy.log`. New Laravel apps get an updated crontab line and sudoers rule; **migration 4.4.14** updates existing apps.
+
+---
+
 ## [4.4.13] — 2026-04-02
 
 ### Fixed
