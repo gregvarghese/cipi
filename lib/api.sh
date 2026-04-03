@@ -30,6 +30,26 @@ _api_token_abilities_default() {
     _api_ability_lines | cut -d'|' -f1 | paste -sd, -
 }
 
+# Run $@ with a wall-clock limit when GNU `timeout` exists (prevents hung `cipi api status`).
+_api_timeout() {
+    local secs="$1"
+    shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$secs" "$@"
+    else
+        "$@"
+    fi
+}
+
+# PsySH (artisan tinker) writes under www-data's home; ensure the dir exists to avoid slow/failed first runs.
+_api_ensure_psysh_home() {
+    local h
+    h=$(getent passwd www-data 2>/dev/null | cut -d: -f6)
+    [[ -z "$h" || ! -d "$h" ]] && return 0
+    mkdir -p "${h}/.config/psysh" 2>/dev/null || true
+    chown -R www-data:www-data "${h}/.config" 2>/dev/null || true
+}
+
 # Terminal checklist (no whiptail): toggle numbers, Enter to confirm. Default: all on.
 # NOTE: This is often run inside $(...) for assignment; stdout is captured, so all UI must go to stderr.
 #       Reads must use /dev/tty so input is not lost when stdin is not the TTY in a subshell.
@@ -131,6 +151,7 @@ api_setup() {
     _api_ensure_laravel_app
 
     ensure_cipi_api_permissions
+    _api_ensure_psysh_home
 
     # Allow www-data (PHP-FPM) to read apps.json for API endpoints
     step "Configuring apps.json access for API..."
@@ -497,6 +518,7 @@ api_status() {
     [[ ! -f "${CIPI_API_ROOT}/artisan" ]] && { error "Laravel API app not found."; exit 1; }
 
     ensure_cipi_api_permissions
+    _api_ensure_psysh_home
 
     local domain; domain=$(vault_read api.json | jq -r '.domain' 2>/dev/null)
 
@@ -505,9 +527,7 @@ api_status() {
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo -e "  Domain:     ${CYAN}https://${domain}${NC}"
 
-    _api_show_versions
-
-    # Queue worker status
+    # Queue first (no DB) so output is useful even if artisan is slow or stuck
     local queue_status
     if systemctl is-active cipi-queue &>/dev/null; then
         queue_status="${GREEN}running${NC}"
@@ -516,9 +536,11 @@ api_status() {
     fi
     echo -e "  Queue:      ${queue_status}"
 
+    _api_show_versions
+
     # Pending jobs (HOME=/tmp avoids psysh writing to /var/www/.config)
     local pending
-    pending=$(cd "${CIPI_API_ROOT}" && sudo -u www-data env HOME=/tmp php artisan tinker --execute="echo \CipiApi\Models\CipiJob::whereIn('status',['pending','running'])->count();" 2>/dev/null || echo "?")
+    pending=$(cd "${CIPI_API_ROOT}" && _api_timeout 45 sudo -u www-data env HOME=/tmp php artisan tinker --execute="echo \CipiApi\Models\CipiJob::whereIn('status',['pending','running'])->count();" 2>/dev/null || echo "?")
     echo -e "  Jobs:       ${CYAN}${pending} pending${NC}"
 
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -527,8 +549,10 @@ api_status() {
 
 _api_show_versions() {
     local laravel_ver cipi_api_ver
-    laravel_ver=$(cd "${CIPI_API_ROOT}" && sudo -u www-data php artisan --version 2>/dev/null | grep -oP '[\d.]+' || echo "unknown")
-    cipi_api_ver=$(cd "${CIPI_API_ROOT}" && composer show cipi/api 2>/dev/null | grep -oP 'versions\s*:\s*\K.*' || echo "dev")
+    laravel_ver=$(_api_timeout 40 bash -c "cd \"${CIPI_API_ROOT}\" && sudo -u www-data env HOME=/tmp php artisan --version 2>/dev/null" | grep -oP '[\d.]+' | head -1)
+    [[ -z "$laravel_ver" ]] && laravel_ver="unknown"
+    cipi_api_ver=$(_api_timeout 25 bash -c "cd \"${CIPI_API_ROOT}\" && composer show cipi/api 2>/dev/null" | grep -oP 'versions\s*:\s*\K.*' | head -1)
+    [[ -z "$cipi_api_ver" ]] && cipi_api_ver="dev"
     echo -e "  Laravel:    ${CYAN}${laravel_ver}${NC}"
     echo -e "  cipi-api:   ${CYAN}${cipi_api_ver}${NC}"
 }
@@ -648,7 +672,8 @@ api_token_revoke() {
 api_fix_permissions() {
     [[ ! -f "${CIPI_API_ROOT}/artisan" ]] && { error "Laravel API app not found at ${CIPI_API_ROOT}"; exit 1; }
     ensure_cipi_api_permissions
-    success "Panel API writable paths (${CIPI_API_ROOT}/storage, database, bootstrap/cache) → www-data"
+    _api_ensure_psysh_home
+    success "Panel API storage/database/bootstrap/cache + .env → www-data; psysh config dir ready"
 }
 
 api_command() {

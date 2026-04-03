@@ -162,6 +162,11 @@ ensure_cipi_api_permissions() {
     [[ -f "${root}/artisan" ]] || return 0
     mkdir -p "${root}/storage/logs" "${root}/database" "${root}/bootstrap/cache" 2>/dev/null || true
     chown -R www-data:www-data "${root}/storage" "${root}/database" "${root}/bootstrap/cache" 2>/dev/null || true
+    # .env must stay www-data-readable (queue worker, artisan, PHP-FPM); root-only breaks or confuses tooling.
+    if [[ -f "${root}/.env" ]]; then
+        chown www-data:www-data "${root}/.env" 2>/dev/null || true
+        chmod 640 "${root}/.env" 2>/dev/null || true
+    fi
 }
 
 app_set() {
