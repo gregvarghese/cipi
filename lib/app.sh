@@ -466,6 +466,10 @@ app_show() {
     printf "  %-14s ${CYAN}%s${NC}\n" "Branch" "$b"
     printf "  %-14s ${CYAN}%s${NC}\n" "PHP" "$p"
     printf "  %-14s ${CYAN}%s${NC}\n" "Created" "$ca"
+    if [[ "$(app_get "$app" basic_auth)" == "true" ]]; then
+        local ba_users; ba_users=$(cut -d: -f1 "/etc/nginx/cipi-basicauth/${app}.htpasswd" 2>/dev/null | paste -sd, -)
+        printf "  %-14s ${GREEN}%s${NC}\n" "Basic Auth" "enabled${ba_users:+ (${ba_users})}"
+    fi
     local git_prov; git_prov=$(app_get "$app" git_provider)
     if [[ -n "$git_prov" ]]; then
         local git_dkid; git_dkid=$(app_get "$app" git_deploy_key_id)
@@ -596,6 +600,7 @@ app_delete() {
     fi
     step "Crontab...";     crontab -u "$app" -r 2>/dev/null||true
     step "Sudoers...";     rm -f "/etc/sudoers.d/cipi-${app}"
+    step "Basic auth...";  rm -f "/etc/nginx/cipi-basicauth/${app}.htpasswd"
     step "SSL...";         certbot delete --cert-name "$d" --non-interactive 2>/dev/null||true
     step "User & files..."
     gpasswd -d www-data "$app" 2>/dev/null||true
@@ -749,6 +754,18 @@ _create_nginx_vhost() {
         fi
     fi
     names=$(echo -e "${domain}\n${aliases_raw}" | grep -v '^[[:space:]]*$' | awk '!seen[$0]++' | tr '\n' ' ' | sed 's/ $//')
+
+    # HTTP basic auth (cipi basicauth enable <app>). Injected into the app's
+    # location blocks — NOT at server level — so that certbot's auto-generated
+    # ACME challenge location (exact match, inherits from server) stays public
+    # and SSL issue/renewal keeps working. certbot clones these location blocks
+    # into the :443 server, so HTTPS is protected too.
+    local auth_block=""
+    if [[ "$(app_get "$app" basic_auth)" == "true" ]] && [[ -f "/etc/nginx/cipi-basicauth/${app}.htpasswd" ]]; then
+        auth_block="        auth_basic \"Restricted\";
+        auth_basic_user_file /etc/nginx/cipi-basicauth/${app}.htpasswd;
+"
+    fi
     local root_path="/home/${app}/current"
     if [[ "$vhost_type" == "custom" ]]; then
         root_path="/home/${app}/htdocs"
@@ -772,10 +789,10 @@ server {
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     client_max_body_size 256M;
     location / {
-        try_files \$uri \$uri/ /index.php?\$args;
+${auth_block}        try_files \$uri \$uri/ /index.php?\$args;
     }
     location ~ \.php$ {
-        fastcgi_pass unix:/run/php/${app}.sock;
+${auth_block}        fastcgi_pass unix:/run/php/${app}.sock;
         fastcgi_param SCRIPT_FILENAME \$realpath_root\$fastcgi_script_name;
         include fastcgi_params;
         fastcgi_hide_header X-Powered-By;
@@ -802,10 +819,10 @@ server {
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     client_max_body_size 256M;
     location / {
-        try_files \$uri \$uri/ /index.php?\$query_string;
+${auth_block}        try_files \$uri \$uri/ /index.php?\$query_string;
     }
     location ~ \.php$ {
-        fastcgi_pass unix:/run/php/${app}.sock;
+${auth_block}        fastcgi_pass unix:/run/php/${app}.sock;
         fastcgi_param SCRIPT_FILENAME \$realpath_root\$fastcgi_script_name;
         include fastcgi_params;
         fastcgi_hide_header X-Powered-By;
@@ -923,6 +940,155 @@ auth_delete() {
 
     log_action "AUTH DELETED: $app"
     success "auth.json deleted for '${app}'"
+}
+
+# ── BASIC AUTH (HTTP) ─────────────────────────────────────────
+# Adds Nginx HTTP Basic Auth (RFC 7617) in front of an app. State lives in
+# apps.json ("basic_auth": "true") and the credentials in an htpasswd file at
+# /etc/nginx/cipi-basicauth/<app>.htpasswd; _create_nginx_vhost injects the
+# auth_basic directives into the location blocks when enabled. NOTE: this is
+# the HTTP gatekeeper — unrelated to `cipi auth` (Composer auth.json).
+
+readonly BASICAUTH_DIR="/etc/nginx/cipi-basicauth"
+
+_basicauth_file() { echo "${BASICAUTH_DIR}/${1}.htpasswd"; }
+
+# Reinstall an already-issued Let's Encrypt cert into the (re)generated vhost.
+# Uses `certbot install` (no ACME round-trip, so no rate-limit risk) so that
+# toggling basic auth never drops HTTPS. Falls back to a plain reload when the
+# app has no certificate yet.
+_nginx_reapply_ssl() {
+    local app="$1" d
+    d=$(app_get "$app" domain)
+    if [[ -n "$d" ]] && [[ -d "/etc/letsencrypt/live/${d}" ]] && command -v certbot &>/dev/null; then
+        certbot install --nginx --cert-name "${d}" --non-interactive --redirect >/dev/null 2>&1 || true
+        reload_nginx
+    else
+        reload_nginx
+    fi
+}
+
+# Add or replace a single user in the app's htpasswd file. Hash via
+# `openssl passwd -apr1` (Apache MD5) so apache2-utils/htpasswd isn't required;
+# nginx supports apr1 natively.
+_basicauth_set_user() {
+    local app="$1" user="$2" password="$3"
+    local file; file=$(_basicauth_file "$app")
+    mkdir -p "$BASICAUTH_DIR"
+    chown root:www-data "$BASICAUTH_DIR" 2>/dev/null || true
+    chmod 750 "$BASICAUTH_DIR" 2>/dev/null || true
+    local hash; hash=$(openssl passwd -apr1 "$password" 2>/dev/null)
+    [[ -z "$hash" ]] && { error "Failed to hash password"; return 1; }
+    [[ -f "$file" ]] && sed -i "/^${user}:/d" "$file" 2>/dev/null || true
+    echo "${user}:${hash}" >> "$file"
+    chown root:www-data "$file" 2>/dev/null || true
+    chmod 640 "$file" 2>/dev/null || true
+}
+
+basicauth_enable() {
+    local app="${1:-}"; shift || true
+    [[ -z "$app" ]] && { error "Usage: cipi basicauth enable <app> [--user=NAME] [--password=PASS]"; exit 1; }
+    app_exists "$app" || { error "App '$app' not found"; exit 1; }
+    parse_args "$@"
+
+    local user="${ARG_user:-}" password="${ARG_password:-}" generated=false
+    if [[ -z "$user" ]]; then
+        if [[ -t 0 ]]; then read_input "Username" "admin" user; else user="admin"; fi
+    fi
+    if [[ ! "$user" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        error "Invalid username. Use letters, digits, dot, underscore, hyphen."; exit 1
+    fi
+    if [[ -z "$password" ]]; then
+        if [[ -t 0 ]]; then
+            local p1 p2
+            echo -e -n "${CYAN}Password (empty = generate)${NC}: "; read -rs p1; echo ""
+            if [[ -z "$p1" ]]; then
+                password=$(generate_password 24); generated=true
+            else
+                echo -e -n "${CYAN}Confirm password${NC}: "; read -rs p2; echo ""
+                [[ "$p1" != "$p2" ]] && { error "Passwords do not match"; exit 1; }
+                password="$p1"
+            fi
+        else
+            password=$(generate_password 24); generated=true
+        fi
+    fi
+
+    step "Writing credentials..."
+    _basicauth_set_user "$app" "$user" "$password" || exit 1
+    app_set "$app" basic_auth "true"
+    success "User '${user}' added"
+
+    step "Updating Nginx vhost..."
+    _create_nginx_vhost "$app" "$(app_get "$app" domain)" "$(app_get "$app" php)"
+    _nginx_reapply_ssl "$app"
+    success "Basic auth enabled"
+
+    log_action "BASICAUTH ENABLED: $app user=$user"
+    cipi_notify \
+        "Cipi basic auth enabled: ${app} on $(hostname)" \
+        "HTTP basic auth was enabled.\n\nServer: $(hostname)\nApp: ${app}\nDomain: $(app_get "$app" domain)\nUser: ${user}\nTime: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+
+    echo ""
+    echo -e "  ${BOLD}Basic auth${NC}  ${GREEN}enabled${NC} for ${CYAN}$(app_get "$app" domain)${NC}"
+    echo -e "  ${BOLD}User${NC}        ${CYAN}${user}${NC}"
+    if [[ "$generated" == true ]]; then
+        echo -e "  ${BOLD}Password${NC}    ${CYAN}${password}${NC}"
+        echo -e "  ${YELLOW}${BOLD}⚠ SAVE THIS PASSWORD — shown only once${NC}"
+    fi
+    echo ""
+}
+
+basicauth_disable() {
+    local app="${1:-}"
+    [[ -z "$app" ]] && { error "Usage: cipi basicauth disable <app>"; exit 1; }
+    app_exists "$app" || { error "App '$app' not found"; exit 1; }
+
+    if [[ "$(app_get "$app" basic_auth)" != "true" ]]; then
+        info "Basic auth is not enabled for '${app}'"; return
+    fi
+
+    app_set "$app" basic_auth "false"
+    rm -f "$(_basicauth_file "$app")"
+
+    step "Updating Nginx vhost..."
+    _create_nginx_vhost "$app" "$(app_get "$app" domain)" "$(app_get "$app" php)"
+    _nginx_reapply_ssl "$app"
+    success "Basic auth disabled for '${app}'"
+
+    log_action "BASICAUTH DISABLED: $app"
+    cipi_notify \
+        "Cipi basic auth disabled: ${app} on $(hostname)" \
+        "HTTP basic auth was disabled.\n\nServer: $(hostname)\nApp: ${app}\nDomain: $(app_get "$app" domain)\nTime: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+}
+
+basicauth_status() {
+    local app="${1:-}"
+    [[ -z "$app" ]] && { error "Usage: cipi basicauth status <app>"; exit 1; }
+    app_exists "$app" || { error "App '$app' not found"; exit 1; }
+    local enabled; enabled=$(app_get "$app" basic_auth)
+    local file; file=$(_basicauth_file "$app")
+    echo -e "\n${BOLD}Basic auth — ${app}${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    if [[ "$enabled" == "true" ]]; then
+        printf "  %-10s ${GREEN}%s${NC}\n" "Status" "enabled"
+    else
+        printf "  %-10s ${DIM}%s${NC}\n" "Status" "disabled"
+    fi
+    if [[ -f "$file" ]]; then
+        printf "  %-10s ${CYAN}%s${NC}\n" "Users" "$(cut -d: -f1 "$file" | paste -sd, -)"
+    fi
+    echo ""
+}
+
+basicauth_command() {
+    local sub="${1:-}"; shift || true
+    case "$sub" in
+        enable)  basicauth_enable "$@" ;;
+        disable) basicauth_disable "$@" ;;
+        status)  basicauth_status "$@" ;;
+        *) error "Unknown: $sub"; echo "Use: enable disable status"; exit 1 ;;
+    esac
 }
 
 # ── RESET PASSWORDS ───────────────────────────────────────────

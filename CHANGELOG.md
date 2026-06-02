@@ -4,6 +4,19 @@ All notable changes to Cipi are documented in this file.
 
 ---
 
+## [4.5.2] — 2026-06-02
+
+### Added
+
+- **HTTP basic auth for apps** — protect any app (Laravel or custom) behind an Nginx username/password prompt: **`cipi basicauth enable <app> [--user=NAME] [--password=PASS]`**, **`cipi basicauth disable <app>`**, **`cipi basicauth status <app>`**. Credentials are stored in `/etc/nginx/cipi-basicauth/<app>.htpasswd` (hashed with `openssl passwd -apr1`, no `apache2-utils` needed); state lives in `apps.json` (`basic_auth`). The `auth_basic` directives are injected into the app's `location` blocks by `_create_nginx_vhost`, so protection survives vhost regeneration (alias add/remove, PHP edit) and certbot clones it into the `:443` block — HTTPS is covered too. ACME challenges stay public (auth is injected per-location, not at server level), and toggling re-runs `certbot install` (no new issuance, no rate-limit risk) so HTTPS is never dropped. Removed automatically on `cipi app delete`. Distinct from `cipi auth` (Composer `auth.json`).
+
+### Fixed
+
+- **Panel API still 500s "after a while"** — 4.5.1 wired up the panel scheduler and pruned `cipi-job-logs`, `cipi_jobs`/`failed_jobs`, and the WAL, but missed the last unbounded-growth source: the `cipi-api` package's `cipi:record-server-metrics` runs **every minute** (~1440 rows/day) and **no job ever prunes the metrics table**. Within a few months it reaches hundreds of thousands of rows; the dashboard / `/api` server endpoints full-scan it on every load until a query crosses PHP-FPM's `request_terminate_timeout` (300s), the worker is `SIGKILL`'d mid-request, and the browser gets an opaque `HTTP ERROR 500` — intermittent at first, then constant. **`cipi-api-maintain`** now prunes the server-metrics table to **14 days** as well (table + timestamp column auto-discovered from the SQLite schema, so it stays correct across package versions), then runs the `wal_checkpoint(TRUNCATE)`. **`lib/migrations/4.5.2.sh`** retrofits existing servers: rewrites the maintenance helper and runs an immediate prune + WAL truncate so operators don't wait until 04:15.
+- **Self-update backups filling `/opt`** — `cipi self-update` copied `/opt/cipi` to `/opt/cipi.bak.<timestamp>` before every run (including daily cron @ 03:50) but never deleted old copies. After `self-update`, Cipi now keeps only the **7 newest** `cipi.bak.*` directories and removes the rest.
+
+---
+
 ## [4.5.1] — 2026-05-21
 
 ### Fixed

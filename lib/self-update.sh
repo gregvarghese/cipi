@@ -4,6 +4,22 @@
 #############################################
 
 readonly _CIPI_REPO="cipi-sh/cipi"
+readonly _CIPI_SELFUPDATE_BACKUP_KEEP=7
+
+_selfupdate_prune_backups() {
+    local keep="${_CIPI_SELFUPDATE_BACKUP_KEEP}" dir count=0 removed=0
+    while IFS= read -r dir; do
+        [[ -d "$dir" ]] || continue
+        ((count++)) || true
+        if (( count > keep )); then
+            rm -rf "$dir" && ((removed++)) || true
+        fi
+    done < <(ls -1dt /opt/cipi.bak.* 2>/dev/null)
+    if (( removed > 0 )); then
+        info "Pruned ${removed} old self-update backup(s) (keeping ${keep} newest)"
+        log_action "SELF-UPDATE: pruned ${removed} /opt/cipi.bak.* (keep=${keep})"
+    fi
+}
 
 selfupdate_command() {
     parse_args "$@"
@@ -59,6 +75,7 @@ selfupdate_command() {
 
     echo "$nv" > "${CIPI_CONFIG}/version"
     rm -rf "$tmp"
+    _selfupdate_prune_backups
     log_action "SELF-UPDATE: v${CIPI_VERSION} → v${nv}"
     success "Updated to v${nv}"
 }

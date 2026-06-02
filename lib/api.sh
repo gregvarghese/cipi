@@ -426,6 +426,9 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Daily maintenance @ 04:15 — keeps the panel SQLite small and snappy:
 #  - prune Laravel failed_jobs older than 14 days
 #  - prune cipi_jobs (completed/failed) older than 14 days
+#  - prune the server-metrics table (cipi:record-server-metrics writes one
+#    row/minute → ~1440/day; left unbounded it slows every dashboard query
+#    until FPM workers hit request_terminate_timeout and 500)
 #  - WAL checkpoint(TRUNCATE) so database.sqlite-wal doesn't grow unbounded
 15 4 * * * www-data /usr/local/bin/cipi-api-maintain >> /var/log/cipi-api-maintain.log 2>&1
 CRON
@@ -462,6 +465,27 @@ if [[ -n "$DB_FILE" && -f "$DB_FILE" ]] && command -v sqlite3 >/dev/null 2>&1; t
     deleted=$(/usr/bin/sqlite3 "$DB_FILE" \
         "DELETE FROM cipi_jobs WHERE status IN ('completed','failed') AND created_at < datetime('now','-14 days'); SELECT changes();" 2>/dev/null)
     echo "  cipi_jobs pruned: ${deleted:-0}"
+
+    # Prune the server-metrics table. cipi:record-server-metrics inserts one
+    # row every minute; nothing in the package prunes it, so over weeks it
+    # grows to hundreds of thousands of rows and every dashboard/server query
+    # full-scans it until FPM hits request_terminate_timeout → opaque 500s.
+    # Table/column names are discovered from the schema so this stays correct
+    # across cipi-api package versions (mirrors the cipi_jobs approach).
+    mtable=$(/usr/bin/sqlite3 "$DB_FILE" \
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%metric%' ORDER BY (name='cipi_server_metrics') DESC, length(name) LIMIT 1;" 2>/dev/null)
+    if [[ -n "$mtable" ]]; then
+        mcol=$(/usr/bin/sqlite3 "$DB_FILE" \
+            "SELECT name FROM pragma_table_info('${mtable}') WHERE name IN ('created_at','recorded_at','timestamp','measured_at','created') ORDER BY (name='created_at') DESC LIMIT 1;" 2>/dev/null)
+        if [[ -n "$mcol" ]]; then
+            mdeleted=$(/usr/bin/sqlite3 "$DB_FILE" \
+                "DELETE FROM \"${mtable}\" WHERE \"${mcol}\" < datetime('now','-14 days'); SELECT changes();" 2>/dev/null)
+            echo "  ${mtable} pruned: ${mdeleted:-0}"
+        else
+            echo "  ${mtable}: no known timestamp column — skipped"
+        fi
+    fi
+
     # WAL checkpoint — reclaims space from database.sqlite-wal that 'PASSIVE'
     # checkpoints don't reclaim under concurrent FPM+queue writers.
     /usr/bin/sqlite3 "$DB_FILE" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
