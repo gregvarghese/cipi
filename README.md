@@ -31,7 +31,7 @@ $ wget -O - https://cipi.sh/setup.sh | bash
 
 ## From zero to production in 3 steps
 
-**1. Install Cipi** on a fresh Ubuntu 24.04+ VPS (~10 minutes):
+**1. Install Cipi** on a fresh Ubuntu 24.04 or 26.04 VPS (~10 minutes):
 
 ```bash
 wget -O - https://cipi.sh/setup.sh | bash
@@ -141,7 +141,7 @@ An official provisioning module that bridges the WHMCS lifecycle to the Cipi RES
 
 ## Requirements
 
-- Ubuntu **24.04 LTS** or higher
+- Ubuntu **24.04 LTS** or **26.04 LTS** (no other releases)
 - Root access
 - Ports **22**, **80**, **443** open
 

@@ -69,11 +69,13 @@ check_requirements() {
         exit 1
     fi
 
-    version_check=$(echo "$VERSION_ID >= 24.04" | bc 2>/dev/null || echo 0)
-    if [ "$version_check" -ne 1 ]; then
-        echo -e "${RED}Error: requires Ubuntu 24.04+ (found: $VERSION_ID)${NC}"
-        exit 1
-    fi
+    case "$VERSION_ID" in
+        24.04|26.04) ;;
+        *)
+            echo -e "${RED}Error: requires Ubuntu 24.04 or 26.04 (found: $VERSION_ID)${NC}"
+            exit 1
+            ;;
+    esac
 
     echo -e "${GREEN}✓ Ubuntu $VERSION_ID — root${NC}"
 }

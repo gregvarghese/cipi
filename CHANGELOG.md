@@ -4,6 +4,14 @@ All notable changes to Cipi are documented in this file.
 
 ---
 
+## [4.6.0] — 2026-06-04
+
+### Changed
+
+- **Supported Ubuntu releases** — fresh installs via `setup.sh` now accept **Ubuntu 24.04 or 26.04 only** (no other version, including interim releases). The initial requirements check uses an exact `VERSION_ID` match instead of a `24.04+` floor.
+
+---
+
 ## [4.5.12] — 2026-06-04
 
 ### Fixed
