@@ -4,6 +4,14 @@ All notable changes to Cipi are documented in this file.
 
 ---
 
+## [4.6.1] — 2026-06-04
+
+### Changed
+
+- **Composer upgraded to 2.10.1+** — servers provisioned earlier kept whatever Composer build the `getcomposer.org` installer shipped at the time (some as old as **2.9.x**), which lags the current stable 2.x release. `setup.sh` now enforces a Composer **2.10.1** floor on fresh installs: after running the installer it checks the reported version and, when below the floor, runs `composer self-update --2` (falling back to a pinned `self-update 2.10.1`). **Migration 4.6.1** applies the same guard to existing servers on `cipi self-update` — it self-updates the system Composer (`/usr/local/bin/composer`) to the latest stable **2.x** when below **2.10.1**, and is idempotent (servers already at/above the floor are skipped).
+
+---
+
 ## [4.6.0] — 2026-06-04
 
 ### Changed

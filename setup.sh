@@ -732,10 +732,24 @@ POOLEOF
 
 # ── COMPOSER ──────────────────────────────────────────────────
 
+readonly COMPOSER_MIN="2.10.1"
+
 install_composer() {
     step_msg "Installing Composer..."
 
     curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer --quiet
+
+    # The installer ships the current stable build, but guard the floor so
+    # fresh installs never end up below the supported Composer release.
+    local cv
+    cv="$(composer --version --no-ansi 2>/dev/null | sed -n 's/.*Composer version \([0-9][0-9.]*\).*/\1/p' | head -1)"
+    if [[ -z "$cv" ]] || [[ "$(printf '%s\n' "$COMPOSER_MIN" "$cv" | sort -V | head -1)" != "$COMPOSER_MIN" ]]; then
+        composer self-update --2 --no-interaction 2>/dev/null || true
+        cv="$(composer --version --no-ansi 2>/dev/null | sed -n 's/.*Composer version \([0-9][0-9.]*\).*/\1/p' | head -1)"
+        if [[ -n "$cv" ]] && [[ "$(printf '%s\n' "$COMPOSER_MIN" "$cv" | sort -V | head -1)" != "$COMPOSER_MIN" ]]; then
+            composer self-update "$COMPOSER_MIN" --no-interaction 2>/dev/null || true
+        fi
+    fi
 
     echo -e "${GREEN}✓ Composer$(composer --version 2>/dev/null | awk '{print " "$3}')${NC}"
 }
