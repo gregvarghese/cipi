@@ -4,6 +4,14 @@ All notable changes to Cipi are documented in this file.
 
 ---
 
+## [4.6.2] — 2026-06-09
+
+### Added
+
+- **Change primary domain via `cipi app edit --domain=`** — you can now rename an app's primary domain without recreating it: **`cipi app edit <app> --domain=<new>`** validates the new name (format + uniqueness), promotes it to primary, moves the previous primary into **aliases** (so the old URL keeps working), regenerates the Nginx vhost, updates **`APP_URL`** in `shared/.env` when present, refreshes the **GitHub/GitLab webhook** URL when git integration is auto-configured (deploy key unchanged), and **re-issues Let's Encrypt** when a certificate already existed for the old primary (otherwise it reminds you to run `cipi ssl install` once DNS for the new domain is ready). Promoting an existing alias to primary works too (e.g. swap `app.example.com` ↔ `www.example.com`). Composable with the existing `--php`, `--branch`, and `--repository` flags.
+
+---
+
 ## [4.6.1] — 2026-06-04
 
 ### Changed

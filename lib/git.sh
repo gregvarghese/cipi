@@ -300,6 +300,51 @@ git_clear_app_data() {
     ensure_apps_json_api_access
 }
 
+# Recreate the provider webhook after a primary domain change (deploy key unchanged).
+git_update_webhook_domain() {
+    local app="$1" domain="$2" repository="$3"
+    local provider hook_id key_id wt token
+
+    provider=$(app_get "$app" git_provider 2>/dev/null || true)
+    hook_id=$(app_get "$app" git_webhook_id 2>/dev/null || true)
+    key_id=$(app_get "$app" git_deploy_key_id 2>/dev/null || true)
+    wt=$(app_get "$app" webhook_token 2>/dev/null || true)
+
+    [[ -z "$provider" || -z "$hook_id" || -z "$wt" || -z "$repository" ]] && return 0
+
+    token=$(_git_server_get "${provider}_token")
+    [[ -z "$token" ]] && {
+        warn "No ${provider} token — update webhook URL manually: https://${domain}/cipi/webhook"
+        return 0
+    }
+
+    local webhook_url="https://${domain}/cipi/webhook"
+    step "Updating ${provider} webhook..."
+
+    local new_hook_id=""
+    if [[ "$provider" == "github" ]]; then
+        local owner_repo; owner_repo=$(_git_parse_github_repo "$repository")
+        _github_remove_webhook "$owner_repo" "$hook_id" 2>/dev/null || true
+        new_hook_id=$(_github_add_webhook "$owner_repo" "$webhook_url" "$wt" 2>&1) || {
+            warn "Could not update GitHub webhook — set manually: ${webhook_url}"
+            return 0
+        }
+    elif [[ "$provider" == "gitlab" ]]; then
+        local project_id; project_id=$(_git_parse_gitlab_project "$repository")
+        _gitlab_remove_webhook "$project_id" "$hook_id" 2>/dev/null || true
+        new_hook_id=$(_gitlab_add_webhook "$project_id" "$webhook_url" "$wt" 2>&1) || {
+            warn "Could not update GitLab webhook — set manually: ${webhook_url}"
+            return 0
+        }
+    fi
+
+    if [[ -n "$new_hook_id" ]]; then
+        vault_read apps.json | jq --arg a "$app" --argjson v "$new_hook_id" '.[$a].git_webhook_id = $v' | vault_write apps.json
+        ensure_apps_json_api_access
+        success "${provider} webhook → ${domain}"
+    fi
+}
+
 # ── CLI COMMANDS ─────────────────────────────────────────────
 
 _git_set_github_token() {

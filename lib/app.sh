@@ -506,14 +506,85 @@ app_show() {
     echo ""
 }
 
+# Change primary domain; the previous primary becomes an alias.
+# Returns 0 on success, 1 on error, 2 if the domain is unchanged.
+_app_change_domain() {
+    local app="$1" new_domain="$2"
+    local old_domain php_ver had_ssl=false repo
+
+    old_domain=$(app_get "$app" domain)
+    [[ "$new_domain" == "$old_domain" ]] && return 2
+
+    validate_domain "$new_domain" || { error "Invalid domain '${new_domain}'"; return 1; }
+    domain_is_used_by_other_app "$new_domain" "$app" && {
+        error "Domain '${new_domain}' is already used by app '${DOMAIN_USED_BY_APP}'"
+        return 1
+    }
+
+    [[ -d "/etc/letsencrypt/live/${old_domain}" ]] && had_ssl=true
+
+    step "Domain ${old_domain} → ${new_domain}..."
+
+    vault_read apps.json | jq \
+        --arg a "$app" --arg old "$old_domain" --arg new "$new_domain" \
+        '.[$a].domain = $new
+         | .[$a].aliases = (
+             (.[$a].aliases // [])
+             | map(select(. != $new))
+             | if (index($old) != null) then . else . + [$old] end
+             | unique
+           )' | vault_write apps.json
+    ensure_apps_json_api_access
+
+    php_ver=$(app_get "$app" php)
+    _create_nginx_vhost "$app" "$new_domain" "$php_ver"
+    reload_nginx || return 1
+
+    if [[ -f "/home/${app}/shared/.env" ]]; then
+        sed -i "s|^APP_URL=.*|APP_URL=https://${new_domain}|" "/home/${app}/shared/.env" 2>/dev/null || true
+    fi
+
+    repo=$(app_get "$app" repository)
+    if [[ -n "$repo" ]]; then
+        source "${CIPI_LIB}/git.sh"
+        git_update_webhook_domain "$app" "$new_domain" "$repo"
+    fi
+
+    if [[ "$had_ssl" == true ]]; then
+        step "Reissuing SSL certificate..."
+        certbot delete --cert-name "$old_domain" --non-interactive 2>/dev/null || true
+        source "${CIPI_LIB}/ssl.sh"
+        _ssl_install "$app" || warn "SSL reinstall failed — run: cipi ssl install ${app}"
+    else
+        info "Run: cipi ssl install ${app}  (after DNS for ${new_domain} is ready)"
+    fi
+
+    success "Domain → ${new_domain} (${old_domain} is now an alias)"
+    return 0
+}
+
 # ── EDIT ──────────────────────────────────────────────────────
 
 app_edit() {
     local app="${1:-}"; shift || true
-    [[ -z "$app" ]] && { error "Usage: cipi app edit <app> [--php=X.Y] [--branch=B] [--repository=URL]"; exit 1; }
+    [[ -z "$app" ]] && { error "Usage: cipi app edit <app> [--domain=D] [--php=X.Y] [--branch=B] [--repository=URL]"; exit 1; }
     app_exists "$app" || { error "App '$app' not found"; exit 1; }
     parse_args "$@"
-    local changed=false cur_php; cur_php=$(app_get "$app" php)
+    local changed=false cur_php domain_change_from=""
+    cur_php=$(app_get "$app" php)
+
+    if [[ -n "${ARG_domain:-}" ]]; then
+        domain_change_from=$(app_get "$app" domain)
+        _app_change_domain "$app" "${ARG_domain}"
+        local domain_rc=$?
+        if [[ "$domain_rc" -eq 0 ]]; then
+            changed=true
+        elif [[ "$domain_rc" -eq 2 ]]; then
+            info "Domain already '${ARG_domain}'"
+        else
+            exit 1
+        fi
+    fi
 
     if [[ -n "${ARG_php:-}" ]]; then
         local np="${ARG_php}"
@@ -561,12 +632,14 @@ app_edit() {
 
         success "Repository updated"; changed=true
     fi
-    [[ "$changed" == false ]] && info "Nothing changed. Use --php, --branch, or --repository"
+    [[ "$changed" == false ]] && info "Nothing changed. Use --domain, --php, --branch, or --repository"
     if [[ "$changed" == true ]]; then
         log_action "APP EDITED: $app $*"
 
         # Email notification
         local edit_details=""
+        [[ -n "${ARG_domain:-}" && -n "$domain_change_from" && "$domain_change_from" != "${ARG_domain}" ]] \
+            && edit_details="${edit_details}Domain: ${domain_change_from} → ${ARG_domain}\n"
         [[ -n "${ARG_php:-}" ]] && edit_details="${edit_details}PHP: ${cur_php} → ${ARG_php}\n"
         [[ -n "${ARG_branch:-}" ]] && edit_details="${edit_details}Branch: ${ARG_branch}\n"
         [[ -n "${ARG_repository:-}" ]] && edit_details="${edit_details}Repository: ${ARG_repository}\n"

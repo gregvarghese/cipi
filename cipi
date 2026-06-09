@@ -62,7 +62,7 @@ show_help() {
     echo -e "                            Create app (Laravel default, or --custom for simple deploy)"
     echo -e "    ${CYAN}cipi app list${NC}                       List apps"
     echo -e "    ${CYAN}cipi app show <app>${NC}                 App details"
-    echo -e "    ${CYAN}cipi app edit <app> [--php=X.Y]${NC}     Edit app"
+    echo -e "    ${CYAN}cipi app edit <app> [--domain=D] [--php=X.Y]${NC}  Edit app"
     echo -e "    ${CYAN}cipi app delete <app>${NC}               Delete app"
     echo -e "    ${CYAN}cipi app suspend <app>${NC}              Take app offline (503 page)"
     echo -e "    ${CYAN}cipi app unsuspend <app>${NC}            Bring app back online"
