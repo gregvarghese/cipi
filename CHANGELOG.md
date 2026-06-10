@@ -4,6 +4,16 @@ All notable changes to Cipi are documented in this file.
 
 ---
 
+## [4.6.4] — 2026-06-10
+
+### Fixed
+
+- **`common.sh` CIPI_LIB when sourced outside `cipi`** — Migrations and other callers that `source common.sh` without going through the main binary left `CIPI_LIB` unset, so `source "${CIPI_LIB}/vault.sh"` failed mid–self-update (notably migration **4.6.3** after token-abilities / api.sh steps). `common.sh` now derives `CIPI_LIB` from its own path via `BASH_SOURCE` when unset (same pattern as `CIPI_CONFIG` / `CIPI_LOG`), with no hardcoded `/opt/cipi/lib`.
+- **Migration runner hygiene** — `self-update` exports `CIPI_LIB`, `CIPI_CONFIG`, and `CIPI_LOG` before running migrations, runs each migration under `set -euo pipefail`, and prints a clear *migration failed — version not updated* message instead of a raw bash traceback.
+- **Partial 4.6.3 recovery** — Servers stuck at **4.6.2** with libs already copied from 4.6.3 can re-run `cipi self-update`: migration **4.6.3** remains idempotent; **4.6.4** verifies the path fix and completes any remaining cron / notifications steps. Emergency pre-release patch: `lib/fix-common-readonly.sh` now also applies the `CIPI_LIB` derive block.
+
+---
+
 ## [4.6.3] — 2026-06-10
 
 ### Added

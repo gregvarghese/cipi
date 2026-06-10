@@ -5,6 +5,9 @@
 
 # When sourced outside the main cipi binary (e.g. migrations), CIPI_* may be unset.
 # The main cipi script sets them readonly — only assign when unset (never touch readonly).
+if [[ -z "${CIPI_LIB:-}" ]]; then
+    CIPI_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 if [[ -z "${CIPI_CONFIG:-}" ]]; then
     CIPI_CONFIG="/etc/cipi"
 fi

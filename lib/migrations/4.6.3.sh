@@ -8,7 +8,11 @@
 # Idempotent — safe to re-run.
 #############################################
 
-set -e
+set -euo pipefail
+
+export CIPI_LIB="${CIPI_LIB:-/opt/cipi/lib}"
+export CIPI_CONFIG="${CIPI_CONFIG:-/etc/cipi}"
+export CIPI_LOG="${CIPI_LOG:-/var/log/cipi}"
 
 readonly CIPI_API_ROOT="/opt/cipi/api"
 readonly API_SH="/opt/cipi/lib/api.sh"
@@ -122,26 +126,28 @@ else
 fi
 
 # 3. Nightly cipi api update cron + helper (refresh from _api_setup_cron when API is installed)
-if [[ -f "${CIPI_LIB:-/opt/cipi/lib}/common.sh" && -f "$API_SH" ]]; then
+if [[ -f "${CIPI_LIB}/common.sh" && -f "$API_SH" ]]; then
     # shellcheck source=/dev/null
-    source "${CIPI_LIB:-/opt/cipi/lib}/common.sh"
+    source "${CIPI_LIB}/common.sh"
     # shellcheck source=/dev/null
     source "$API_SH"
-    if [[ -f "${CIPI_CONFIG:-/etc/cipi}/api.json" ]]; then
+    if [[ -f "${CIPI_CONFIG}/api.json" ]]; then
         _api_setup_cron
         echo "  /etc/cron.d/cipi-api refreshed (nightly api update @ 04:30)"
     else
         echo "  Panel API not configured — skip cron refresh"
     fi
+else
+    echo "  common.sh or api.sh not found — skip cron refresh"
 fi
 
 # 4. Notification triggers
-if [[ -f "${CIPI_LIB:-/opt/cipi/lib}/notifications.sh" ]]; then
+if [[ -f "${CIPI_LIB}/notifications.sh" ]]; then
     # shellcheck source=/dev/null
-    source "${CIPI_LIB:-/opt/cipi/lib}/vault.sh"
+    source "${CIPI_LIB}/vault.sh"
     # shellcheck source=/dev/null
-    source "${CIPI_LIB:-/opt/cipi/lib}/notifications.sh"
-    if [[ -f "${CIPI_CONFIG:-/etc/cipi}/notifications.json" ]]; then
+    source "${CIPI_LIB}/notifications.sh"
+    if [[ -f "${CIPI_CONFIG}/notifications.json" ]]; then
         echo "  notifications.json already exists — skip"
     else
         _notify_ensure_config

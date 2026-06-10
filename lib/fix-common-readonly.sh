@@ -1,9 +1,14 @@
 #!/bin/bash
-# One-shot fix when /opt/cipi/lib/common.sh breaks "cipi" with:
-#   CIPI_CONFIG: readonly variable
+# Emergency one-shot when /opt/cipi/lib/common.sh breaks cipi or migrations:
+#   - CIPI_CONFIG: readonly variable  (pre-4.4.9)
+#   - CIPI_LIB unset when common.sh is sourced outside the main binary (pre-4.6.4)
+#
 # Run as root on the server, then: cipi self-update
 #
 #   curl -fsSL https://raw.githubusercontent.com/cipi-sh/cipi/latest/lib/fix-common-readonly.sh | sudo bash
+#
+# On 4.6.4+ this is built into common.sh; keep this script for servers that cannot
+# self-update yet.
 
 set -euo pipefail
 
@@ -23,6 +28,9 @@ START=$(grep -nF 'source "${CIPI_LIB}/vault.sh"' "$COMMON" | head -1 | cut -d: -
     cat <<'HDR'
 # When sourced outside the main cipi binary (e.g. migrations), CIPI_* may be unset.
 # The main cipi script sets them readonly — only assign when unset (never touch readonly).
+if [[ -z "${CIPI_LIB:-}" ]]; then
+    CIPI_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
 if [[ -z "${CIPI_CONFIG:-}" ]]; then
     CIPI_CONFIG="/etc/cipi"
 fi

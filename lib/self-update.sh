@@ -59,12 +59,21 @@ selfupdate_command() {
     # broken. Reclaim the writable paths unconditionally, right here.
     ensure_cipi_api_permissions
 
-    # Run migrations
+    # Run migrations — export CIPI_* so scripts sourced inside migrations work even
+    # when the runner does not go through the main cipi binary (belt to common.sh auto-path).
+    export CIPI_LIB="${CIPI_LIB:-/opt/cipi/lib}"
+    export CIPI_CONFIG="${CIPI_CONFIG:-/etc/cipi}"
+    export CIPI_LOG="${CIPI_LOG:-/var/log/cipi}"
     if [[ -d "${tmp}/lib/migrations" ]]; then
         for m in $(ls "${tmp}/lib/migrations/"*.sh 2>/dev/null|sort -V); do
             local mv; mv=$(basename "$m" .sh)
             if [[ "$(printf '%s\n' "$CIPI_VERSION" "$mv"|sort -V|head -1)" == "$CIPI_VERSION" && "$mv" != "$CIPI_VERSION" ]]; then
-                step "Migration ${mv}..."; bash "$m" 2>&1
+                step "Migration ${mv}..."
+                if ! ( set -euo pipefail; bash "$m" ); then
+                    error "Migration ${mv} failed — version not updated, installation unchanged at v${CIPI_VERSION}"
+                    rm -rf "$tmp"
+                    exit 1
+                fi
             fi
         done
     fi
