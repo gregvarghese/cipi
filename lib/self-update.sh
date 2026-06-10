@@ -59,11 +59,9 @@ selfupdate_command() {
     # broken. Reclaim the writable paths unconditionally, right here.
     ensure_cipi_api_permissions
 
-    # Run migrations — export CIPI_* so scripts sourced inside migrations work even
-    # when the runner does not go through the main cipi binary (belt to common.sh auto-path).
-    export CIPI_LIB="${CIPI_LIB:-/opt/cipi/lib}"
-    export CIPI_CONFIG="${CIPI_CONFIG:-/etc/cipi}"
-    export CIPI_LOG="${CIPI_LOG:-/var/log/cipi}"
+    # Run migrations — child bash processes need CIPI_* in the environment.
+    # The main cipi binary sets CIPI_LIB/CONFIG/LOG readonly; export by name only (no reassignment).
+    export CIPI_LIB CIPI_CONFIG CIPI_LOG
     export CIPI_API_ROOT="${CIPI_API_ROOT:-/opt/cipi/api}"
     if [[ -d "${tmp}/lib/migrations" ]]; then
         for m in $(ls "${tmp}/lib/migrations/"*.sh 2>/dev/null|sort -V); do
