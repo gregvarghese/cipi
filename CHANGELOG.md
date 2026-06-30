@@ -8,7 +8,7 @@ All notable changes to Cipi are documented in this file.
 
 ### Changed
 
-- **GUI package source** — **`cipi gui`** now installs and updates **`cipi/gui`** from **[GitHub](https://github.com/cipi-sh/gui)** via Composer VCS (`dev-main`), not from a bundled copy under **`/opt/cipi/cipi-gui`**. PHP-FPM **`open_basedir`** is simplified to **`/opt/cipi/gui/`** only (package lives in **`vendor/`**). **Migration 4.7.5** migrates existing servers and removes the legacy bundle directory. New favicon and logo ship in **`cipi/gui`** (run **`cipi gui update`** after pushing to the GUI repo).
+- **GUI package source** — **`cipi gui`** now installs and updates **`cipi/gui`** from **[GitHub](https://github.com/cipi-sh/gui)** via Composer VCS (`dev-main`). The **`cipi-gui/`** directory was removed from this repo (GUI lives in its own repository). PHP-FPM **`open_basedir`** is simplified to **`/opt/cipi/gui/`** only. **Migration 4.7.5** migrates existing servers and removes the legacy **`/opt/cipi/cipi-gui`** bundle.
 
 ### Added
 

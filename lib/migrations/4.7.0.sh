@@ -2,7 +2,7 @@
 #############################################
 # Cipi Migration 4.7.0 — Cipi GUI CLI integration
 #
-# Bundles lib/gui.sh + cipi-gui package (copied by self-update before migrations).
+# Bundles lib/gui.sh (cipi/gui package comes from GitHub VCS at install time).
 # Reclaims GUI writable paths if the panel is already installed.
 #
 # Idempotent — safe to re-run.
