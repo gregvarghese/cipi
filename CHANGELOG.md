@@ -16,7 +16,7 @@ All notable changes to Cipi are documented in this file.
 
 ### Fixed
 
-- **`cipi gui reset-user`** — no longer requires **`--reset`** on **`cipi:seed-gui-user`** (missing in current **`cipi/gui`** on GitHub). Resets the primary admin via **`lib/gui-reset-admin.php`**, writing the payload under **`storage/app/`** as **`www-data`** (fixes **`Could not open input file`** when temp files lived in **`/tmp`**).
+- **`cipi gui reset-user`** — fixes login failing after reset (**`These credentials do not match our records`**) caused by **double password hashing** (Laravel 12 **`hashed`** cast + **`Hash::make()`** in **`cipi/gui`**'s **`--reset`**). Always resets via **`lib/gui-reset-admin.php`** (plain password + session purge). Payload written under **`storage/app/`** as **`www-data`**.
 
 ---
 

@@ -15,6 +15,9 @@ require $root.'/vendor/autoload.php';
 $app = require $root.'/bootstrap/app.php';
 $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
 
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+
 $user = App\Models\User::query()->orderBy('id')->first();
 if (! $user) {
     fwrite(STDERR, "No admin user found\n");
@@ -24,8 +27,15 @@ if (! $user) {
 $user->forceFill([
     'email' => $payload['email'] ?? $user->email,
     'name' => $payload['name'] ?? $user->name,
-    'password' => Illuminate\Support\Facades\Hash::make($payload['password']),
+    // Plain password — Laravel User model uses the "hashed" cast (do not Hash::make here).
+    'password' => $payload['password'],
     'two_factor_secret' => null,
     'two_factor_enabled' => false,
     'two_factor_confirmed_at' => null,
 ])->save();
+
+if (Schema::hasTable('sessions') && Schema::hasColumn('sessions', 'user_id')) {
+    DB::table('sessions')->where('user_id', $user->id)->delete();
+}
+
+fwrite(STDOUT, "OK: {$user->email}\n");

@@ -554,11 +554,6 @@ _gui_reset_primary_admin() {
     return "$rc"
 }
 
-_gui_seed_supports_reset() {
-    (cd "${CIPI_GUI_ROOT}" && sudo -u www-data php artisan cipi:seed-gui-user --help 2>/dev/null) \
-        | grep -q '\-\-reset'
-}
-
 gui_reset_user() {
     [[ ! -f "${CIPI_GUI_ROOT}/artisan" ]] && {
         error "Laravel GUI app not found. Run: cipi gui <domain>"
@@ -578,16 +573,9 @@ gui_reset_user() {
     step "Resetting GUI admin user..."
     ensure_cipi_gui_permissions
 
-    if _gui_seed_supports_reset; then
-        local cmd=(sudo -u www-data php artisan cipi:seed-gui-user --reset)
-        [[ -n "$email" ]] && cmd+=(--email="${email}")
-        cmd+=(--password="${password}")
-        [[ -n "${ARG_name:-}" ]] && cmd+=(--name="${ARG_name}")
-        if ! (cd "${CIPI_GUI_ROOT}" && "${cmd[@]}"); then
-            error "Failed to reset GUI admin user"
-            exit 1
-        fi
-    elif ! _gui_reset_primary_admin "$email" "$password" "${ARG_name:-}"; then
+    # Always use lib/gui-reset-admin.php — cipi/gui's artisan --reset double-hashes
+    # passwords on Laravel 12+ (User model "hashed" cast) and may target the wrong email.
+    if ! _gui_reset_primary_admin "$email" "$password" "${ARG_name:-}"; then
         error "Failed to reset GUI admin user"
         exit 1
     fi
