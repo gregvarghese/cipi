@@ -150,11 +150,12 @@ app_get() { vault_read apps.json | jq -r --arg a "$1" --arg k "$2" '.[$a][$k] //
 
 # Generate apps-public.json: a plaintext projection of apps.json containing
 # only non-sensitive fields (domain, aliases, php, branch, repository, user,
-# created_at). The encrypted apps.json keeps webhook tokens and git IDs safe.
+# created_at, suspended, basic_auth, custom, docroot). The encrypted apps.json
+# keeps webhook tokens and git IDs safe.
 _update_apps_public() {
     [[ -f "${CIPI_CONFIG}/apps.json" ]] || return 0
     vault_read apps.json | jq '
-        with_entries(.value |= {domain, aliases, php, branch, repository, user, created_at})
+        with_entries(.value |= {domain, aliases, php, branch, repository, user, created_at, suspended, basic_auth, custom, docroot})
     ' > "${CIPI_CONFIG}/apps-public.json"
     chmod 640 "${CIPI_CONFIG}/apps-public.json"
     chgrp cipi-api "${CIPI_CONFIG}/apps-public.json" 2>/dev/null || true
