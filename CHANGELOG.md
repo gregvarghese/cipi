@@ -4,6 +4,14 @@ All notable changes to Cipi are documented in this file.
 
 ---
 
+## [4.7.6] — 2026-07-01
+
+### Fixed
+
+- **Panel Basic Auth / Suspend failing with `sudo: a terminal is required to read the password`** — the panel runs as **`www-data`** and calls **`sudo cipi basicauth enable|disable|status`** (ability `apps-basicauth`) and **`sudo cipi app suspend|unsuspend`** (ability `apps-suspend`), but these were missing from the **`/etc/sudoers.d/cipi-api`** whitelist, so `sudo` prompted for a password and failed without a TTY. Added them to the whitelist. **Migration 4.7.6** applies the same fix on existing servers via **`cipi self-update`**.
+
+---
+
 ## [4.7.5] — 2026-07-01
 
 ### Changed

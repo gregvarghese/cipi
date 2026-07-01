@@ -894,6 +894,11 @@ install_cipi() {
 www-data ALL=(root) NOPASSWD: /usr/local/bin/cipi app create *, \
                                /usr/local/bin/cipi app edit *, \
                                /usr/local/bin/cipi app delete *, \
+                               /usr/local/bin/cipi app suspend *, \
+                               /usr/local/bin/cipi app unsuspend *, \
+                               /usr/local/bin/cipi basicauth enable *, \
+                               /usr/local/bin/cipi basicauth disable *, \
+                               /usr/local/bin/cipi basicauth status *, \
                                /usr/local/bin/cipi deploy *, \
                                /usr/local/bin/cipi alias add *, \
                                /usr/local/bin/cipi alias remove *, \
