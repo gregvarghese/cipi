@@ -58,8 +58,14 @@ _db_list() {
 }
 
 _db_delete() {
-    local name="${1:-}"; [[ -z "$name" ]] && { error "Usage: cipi db delete <name>"; exit 1; }
-    confirm "Delete database '${name}'?" || return
+    local name="${1:-}"; [[ -z "$name" ]] && { error "Usage: cipi db delete <name> [--force]"; exit 1; }
+    parse_args "$@"
+    # Non-interactive callers (API/UI job runner) have no TTY to answer the
+    # prompt, so `confirm`'s `read` blocks forever and the job hangs. Skip the
+    # confirmation when --force is passed or stdin is not a terminal.
+    if [[ "${ARG_force:-}" != "true" ]] && [[ -t 0 ]]; then
+        confirm "Delete database '${name}'?" || { info "Cancelled"; return; }
+    fi
     local dbr; dbr=$(get_db_root_password)
     local u; u=$(vault_read databases.json | jq -r --arg n "$name" '.[$n].user//$n' 2>/dev/null)
     mariadb -u root -p"$dbr" -e "DROP DATABASE IF EXISTS \`${name}\`; DROP USER IF EXISTS '${u}'@'localhost'; FLUSH PRIVILEGES;" 2>/dev/null
@@ -84,9 +90,14 @@ _db_backup() {
 
 _db_restore() {
     local name="${1:-}" file="${2:-}"
-    [[ -z "$name" || -z "$file" ]] && { error "Usage: cipi db restore <name> <file>"; exit 1; }
+    [[ -z "$name" || -z "$file" ]] && { error "Usage: cipi db restore <name> <file> [--force]"; exit 1; }
     [[ ! -f "$file" ]] && { error "File not found: $file"; exit 1; }
-    confirm "Restore '${name}' from '${file}'?" || return
+    parse_args "$@"
+    # Skip confirmation for non-interactive callers (API/UI job runner) — see
+    # _db_delete: a blocking `read` with no TTY would hang the job.
+    if [[ "${ARG_force:-}" != "true" ]] && [[ -t 0 ]]; then
+        confirm "Restore '${name}' from '${file}'?" || { info "Cancelled"; return; }
+    fi
     local dbr; dbr=$(get_db_root_password)
     if [[ "$file" == *.gz ]]; then gunzip -c "$file"|mariadb -u root -p"$dbr" "$name" 2>/dev/null
     else mariadb -u root -p"$dbr" "$name"<"$file" 2>/dev/null; fi

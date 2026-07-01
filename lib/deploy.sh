@@ -102,7 +102,12 @@ _deploy_rollback() {
     local app="$1" home="/home/${app}"
     local php_ver; php_ver=$(app_get "$app" php)
     _deploy_assert_php_compat "$app" "$php_ver"
-    confirm "Rollback '${app}'?" || { info "Cancelled"; return; }
+    # Skip confirmation for non-interactive callers (API/UI job runner): a
+    # blocking `read` with no TTY would hang the job. --force is parsed upstream
+    # in deploy_command.
+    if [[ "${ARG_force:-}" != "true" ]] && [[ -t 0 ]]; then
+        confirm "Rollback '${app}'?" || { info "Cancelled"; return; }
+    fi
     info "Rolling back..."
     sudo -u "$app" bash -c "cd ${home} && /usr/bin/php${php_ver} /usr/local/bin/dep rollback -f ${home}/.deployer/deploy.php 2>&1"
     local rc=$?
