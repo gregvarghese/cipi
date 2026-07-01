@@ -4,6 +4,14 @@ All notable changes to Cipi are documented in this file.
 
 ---
 
+## [4.7.11] — 2026-07-01
+
+### Added
+
+- **Setup post-install guide** — after the credentials summary, **`setup.sh`** now prints a short step-by-step guide for the optional **Panel API** (`cipi api <domain>` → `cipi api ssl` → `cipi api token create`) and **Web GUI** (`cipi gui <domain>` → `cipi gui ssl`), including DNS hints and what each layer does.
+
+---
+
 ## [4.7.10] — 2026-07-01
 
 ### Added

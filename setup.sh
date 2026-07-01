@@ -22,6 +22,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
+DIM='\033[2m'
 NC='\033[0m'
 BOLD='\033[1m'
 
@@ -1150,7 +1151,41 @@ final_summary() {
     echo -e "  All commands:   ${CYAN}cipi help${NC}"
     echo -e "  Create app:     ${CYAN}cipi app create${NC}"
     echo ""
+    _final_summary_panel_guide "$SERVER_IP"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+}
+
+# Post-setup guide: optional Panel API and Web GUI (same server or remote).
+_final_summary_panel_guide() {
+    local server_ip="${1:-}"
+
+    echo -e "  ${BOLD}Optional — Panel API & Web GUI${NC}"
+    echo -e "  ${DIM}Manage apps from a browser instead of SSH. Two optional layers:${NC}"
+    echo -e "  ${DIM}  • Panel API  — REST endpoints + tokens for scripts and the GUI${NC}"
+    echo -e "  ${DIM}  • Web GUI    — multi-server control panel (needs API on each server)${NC}"
+    echo ""
+    echo -e "  ${BOLD}1. Panel API${NC} ${DIM}(install first — ~2 min)${NC}"
+    echo -e "  Point a DNS A record to ${CYAN}${server_ip}${NC}, then run:"
+    echo -e "    ${CYAN}cipi api api.yourdomain.com${NC}"
+    echo -e "  ${DIM}Provisions Laravel, PHP-FPM, Nginx and a queue worker automatically.${NC}"
+    echo ""
+    echo -e "  ${BOLD}2. HTTPS for the API${NC}"
+    echo -e "    ${CYAN}cipi api ssl${NC}"
+    echo ""
+    echo -e "  ${BOLD}3. API token${NC} ${DIM}(for the GUI, CI, or cipi-cli)${NC}"
+    echo -e "    ${CYAN}cipi api token create${NC}"
+    echo -e "  ${DIM}Pick abilities from the menu; save the token — it is shown once.${NC}"
+    echo ""
+    echo -e "  ${BOLD}4. Web GUI${NC} ${DIM}(optional — same server or another machine)${NC}"
+    echo -e "  Point another DNS name to the GUI host, then:"
+    echo -e "    ${CYAN}cipi gui panel.yourdomain.com${NC}"
+    echo -e "  ${DIM}Prompts for admin email/password; registers servers with API tokens.${NC}"
+    echo ""
+    echo -e "  ${BOLD}5. HTTPS for the GUI${NC}"
+    echo -e "    ${CYAN}cipi gui ssl${NC}"
+    echo ""
+    echo -e "  ${DIM}After API setup: https://api.yourdomain.com/docs · GUI repo: https://github.com/cipi-sh/gui${NC}"
     echo ""
 }
 
