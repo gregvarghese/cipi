@@ -730,6 +730,70 @@ app_logs() {
     esac
 }
 
+# Non-following paginated snapshot for the panel API (open_basedir blocks PHP reads under /home).
+app_logs_read() {
+    local app="${1:-}"; shift||true
+    [[ -z "$app" ]] && { error "Usage: cipi app logs read <app> [--type=T] [--page=N] [--per-page=N]"; exit 1; }
+    app_exists "$app" || { error "Not found"; exit 1; }
+    parse_args "$@"
+    local type="${ARG_type:-all}"
+    local page="${ARG_page:-1}"
+    local per_page="${ARG_per_page:-50}"
+
+    if ! [[ "$page" =~ ^[0-9]+$ && "$per_page" =~ ^[0-9]+$ ]]; then
+        error "page and per-page must be positive integers"
+        exit 1
+    fi
+
+    local home="/home/${app}"
+    local logs_dir="${home}/logs"
+    local laravel_dir="${home}/shared/storage/logs"
+    local is_custom; is_custom=$(app_get "$app" custom)
+    local -a patterns=()
+
+    case "$type" in
+        nginx)   patterns=("${logs_dir}/nginx-*.log") ;;
+        php)     patterns=("${logs_dir}/php-fpm-*.log") ;;
+        worker)  patterns=("${logs_dir}/worker-*.log") ;;
+        deploy)  patterns=("${logs_dir}/deploy.log") ;;
+        laravel)
+            if [[ "$is_custom" == "true" ]]; then
+                patterns=("${laravel_dir}/*.log" "${logs_dir}/*.log")
+            else
+                patterns=("${laravel_dir}/*.log")
+            fi
+            ;;
+        all)
+            if [[ "$is_custom" == "true" ]]; then
+                patterns=("${laravel_dir}/*.log" "${logs_dir}/*.log")
+            else
+                patterns=("${laravel_dir}/*.log" "${logs_dir}/*.log")
+            fi
+            ;;
+        *) error "Unknown log type: ${type}"; exit 1 ;;
+    esac
+
+    local pattern
+    for pattern in "${patterns[@]}"; do
+        _cipi_emit_log_page "$pattern" "$page" "$per_page"
+    done
+}
+
+_cipi_emit_log_page() {
+    local pattern="$1" page="$2" per_page="$3"
+    shopt -s nullglob
+    local f
+    for f in $pattern; do
+        [[ -f "$f" ]] || continue
+        local total from_end
+        total=$(wc -l < "$f" | tr -d ' \n')
+        from_end=$(( page * per_page ))
+        echo "===CIPI_LOG_FILE:${f}:${total}==="
+        /usr/bin/tail -n "$from_end" "$f" | /usr/bin/head -n "$per_page"
+        echo "===CIPI_LOG_END==="
+    done
+}
+
 app_tinker() {
     local app="${1:-}"; [[ -z "$app" ]] && { error "Usage: cipi app tinker <app>"; exit 1; }
     app_exists "$app" || { error "Not found"; exit 1; }
@@ -1526,14 +1590,21 @@ app_command() {
         edit)    app_edit "$@" ;;
         delete)  app_delete "$@" ;;
         env)     app_env "$@" ;;
-        logs)    app_logs "$@" ;;
+        logs)
+            if [[ "${1:-}" == "read" ]]; then
+                shift
+                app_logs_read "$@"
+            else
+                app_logs "$@"
+            fi
+            ;;
         tinker)  app_tinker "$@" ;;
         artisan) app_artisan "$@" ;;
         suspend)   app_suspend "$@" ;;
         unsuspend) app_unsuspend "$@" ;;
         reset-password)    app_reset_password "$@" ;;
         reset-db-password) app_reset_db_password "$@" ;;
-        *) error "Unknown: $sub"; echo "Use: create list show edit delete env logs tinker artisan suspend unsuspend reset-password reset-db-password"; exit 1 ;;
+        *) error "Unknown: $sub"; echo "Use: create list show edit delete env logs tinker artisan suspend unsuspend reset-password reset-db-password"; echo "      logs read <app> [--type=T] [--page=N] [--per-page=N]  (API snapshot)"; exit 1 ;;
     esac
 }
 

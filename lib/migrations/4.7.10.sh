@@ -1,24 +1,15 @@
 #!/bin/bash
 #############################################
-# Cipi Migration 4.7.8 — panel API app log reads
+# Cipi Migration 4.7.10 — app logs read for panel API
 #
-# GET /api/apps/{name}/logs uses paginated tail via sudo. www-data was not
-# allowed to run /bin/bash (or read Laravel logs under shared/storage/logs),
-# so the GUI showed nginx/php logs but not laravel-*.log.
+# cipi-api PHP runs with open_basedir excluding /home/*, so log files must be
+# read via sudo. Adds `cipi app logs read` to sudoers (works even when
+# cipi-read-app-logs is missing).
 #############################################
 
 set -e
 
-CIPI_LIB="${CIPI_LIB:-/opt/cipi/lib}"
-
-echo "Migration 4.7.8 — Install cipi-read-app-logs and extend cipi-api sudoers..."
-
-if [[ -f "${CIPI_LIB}/cipi-read-app-logs.sh" ]]; then
-    cp "${CIPI_LIB}/cipi-read-app-logs.sh" /usr/local/bin/cipi-read-app-logs
-    chmod 755 /usr/local/bin/cipi-read-app-logs
-    chown root:root /usr/local/bin/cipi-read-app-logs
-    echo "  Installed /usr/local/bin/cipi-read-app-logs"
-fi
+echo "Migration 4.7.10 — Allow www-data to run cipi app logs read via sudo..."
 
 cat > /etc/sudoers.d/cipi-api <<'SUDOEOF'
 www-data ALL=(root) NOPASSWD: /usr/local/bin/cipi app create *, \
@@ -45,4 +36,4 @@ www-data ALL=(root) NOPASSWD: /usr/local/bin/cipi app create *, \
 SUDOEOF
 chmod 440 /etc/sudoers.d/cipi-api
 
-echo "Migration 4.7.8 complete"
+echo "Migration 4.7.10 complete"
