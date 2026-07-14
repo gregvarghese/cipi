@@ -83,14 +83,26 @@ elif command -v chattr &>/dev/null; then
 fi
 rm -rf "$RO_TMP"
 
-if grep -q 'if _cipi_config_writable 2>/dev/null; then' "${LIB}/common.sh" \
-    && grep -A1 'if _cipi_config_writable 2>/dev/null; then' "${LIB}/common.sh" | grep -q 'chmod 700'; then
-    pass "common.sh chmod 700 only when config dir is writable"
+if ! grep -qE '^chmod 700 "\$\{CIPI_CONFIG\}"' "${LIB}/common.sh"; then
+    pass "common.sh init does not chmod /etc/cipi on every source"
 else
-    fail "common.sh should chmod 700 only after _cipi_config_writable"
+    fail "common.sh still chmods /etc/cipi on init"
 fi
 
-# ── 4. _db_list tab parsing (no subshell regression) ─────────────
+if grep -q '_cipi_safe_chmod' "${LIB}/vault.sh"; then
+    pass "vault.sh uses _cipi_safe_chmod"
+else
+    fail "vault.sh missing _cipi_safe_chmod"
+fi
+
+# ── 4. _db_list lists empty databases (schemata, not tables only) ─
+if grep -q 'information_schema.schemata' "${LIB}/db.sh"; then
+    pass "db list uses schemata (includes empty databases)"
+else
+    fail "db list still queries tables only — empty DBs hidden"
+fi
+
+# ── 5. _db_list tab parsing (no subshell regression) ─────────────
 parse_rows() {
     local rows=$'alpha\t1.00\nbeta\t2.50\n'
     local out="" line
@@ -105,7 +117,7 @@ parsed=$(parse_rows)
     && pass "_db_list row parsing (here-string, no pipe subshell)" \
     || fail "_db_list row parsing expected 'alpha:1.00;beta:2.50;' got '${parsed}'"
 
-# ── 5. sudoers template includes db list (sudo-rs safe) ──────────
+# ── 6. sudoers template includes db list (sudo-rs safe) ──────────
 if grep -q 'cipi db list,' "${LIB}/cipi-api-sudoers.sh" \
     && grep -q 'cipi db restore \*,' "${LIB}/cipi-api-sudoers.sh" \
     && ! grep -v '^#' "${LIB}/cipi-api-sudoers.sh" | grep -q 'db restore \* \*'; then
@@ -114,11 +126,16 @@ else
     fail "cipi-api-sudoers.sh sudoers regression"
 fi
 
-# ── 7. Migration 4.7.18 exists and supersedes partial 4.7.16 fix ─
+# ── 7. Migration 4.7.18 consolidates fix (no 4.7.19 migration) ───
 [[ -f "${LIB}/migrations/4.7.18.sh" ]] \
     && grep -q 'completes 4.7.16 / 4.7.17' "${LIB}/migrations/4.7.18.sh" \
-    && pass "migration 4.7.18 documents fix for incomplete 4.7.16/4.7.17" \
+    && grep -q 'information_schema.schemata' "${LIB}/migrations/4.7.18.sh" \
+    && pass "migration 4.7.18 documents consolidated db list fix" \
     || fail "migration 4.7.18 missing or incomplete"
+
+[[ ! -f "${LIB}/migrations/4.7.19.sh" ]] \
+    && pass "no migration 4.7.19 (fix lives in 4.7.18 only)" \
+    || fail "lib/migrations/4.7.19.sh should not exist"
 
 # 4.7.16 must stay historical (chmod-only patch, no _cipi_config_writable skip)
 if [[ -f "${LIB}/migrations/4.7.16.sh" ]] \

@@ -4,25 +4,16 @@ All notable changes to Cipi are documented in this file.
 
 ---
 
-## [4.7.19] — 2026-07-14
-
-### Fixed
-
-- **`cipi db list` missing databases** — **`lib/db.sh`** now uses **`information_schema.schemata`** so **empty** databases (fresh **`cipi db create`**, pre-migrate app DBs) show as **0 MB**. **Migration 4.7.19** verifies **`lib/db.sh`** on servers already on **4.7.18**.
-- **Read-only `/etc/cipi` polish** — **`lib/common.sh`** no longer runs init **`chmod 700 /etc/cipi`** on every source; **`lib/vault.sh`** adds **`_cipi_safe_chmod`** and guards **`vault_write`** when **`/etc/cipi`** is read-only.
-
----
-
 ## [4.7.18] — 2026-07-14
 
 ### Fixed
 
-- **`cipi db list` failing on Ubuntu 25.10+ / 26.04** — **Migration 4.7.18** completes the fix left incomplete by **4.7.16** (chmod `|| true` only) and **4.7.17** (sudoers + open_basedir + warn-only lib check). Those migrations are unchanged; **4.7.18** is the step that makes **`cipi db list`** work on existing servers:
-  - **Read-only `/etc/cipi`** — **`lib/common.sh`** / **`lib/vault.sh`** (copied before the migration runs): **`_cipi_config_writable`** touch probe, skip **`apps-public.json`** / vault init when not writable, **`chmod 700`** only after probe succeeds.
-  - **sudo-rs sudoers** + **API `open_basedir`** — re-applied idempotently (same as 4.7.17).
+- **`cipi db list` on Ubuntu 25.10+ / 26.04** — **Migration 4.7.18** completes what **4.7.16** / **4.7.17** left incomplete:
+  - **Read-only `/etc/cipi`** — **`lib/common.sh`** / **`lib/vault.sh`**: **`_cipi_config_writable`**, **no init `chmod`**, **`_cipi_safe_chmod`**; migration re-installs lib from self-update bundle (or GitHub) when needed. Fixes **`HTTP 503: chmod … Read-only file system`** from **`cipi-cli db list`**.
+  - **sudo-rs sudoers** + **API `open_basedir`** — re-applied idempotently.
   - **`mount -o remount,rw /`** when `/etc/cipi` is read-only; refresh **`apps-public.json`**; **`sudo cipi db list`** smoke test.
+- **`cipi db list` missing databases** — **`lib/db.sh`** now uses **`information_schema.schemata`** so **empty** databases (fresh **`cipi db create`**, pre-migrate app DBs) show as **0 MB**.
 - **`cipi db list` silent MariaDB failures** — surfaces vault/MariaDB errors instead of a blank table.
-- **`chmod 700 /etc/cipi` only when writable** — init no longer runs `chmod` before the touch probe.
 
 ---
 
