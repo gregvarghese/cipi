@@ -4,11 +4,22 @@ All notable changes to Cipi are documented in this file.
 
 ---
 
+## [4.7.17] — 2026-07-14
+
+### Fixed
+
+- **Panel API on Ubuntu 25.10+ / 26.04 (consolidated)** — **Migration 4.7.17** applies in one **`cipi self-update`** pass:
+  - **sudo-rs sudoers** — rewrites **`/etc/sudoers.d/cipi-api`** via **`lib/cipi-api-sudoers.sh`** (`cipi db restore *` instead of `* *`).
+  - **Log viewer / `CipiLogReader`** — API PHP-FPM **`open_basedir`** now includes **`/usr/local/bin/`** so **`is_executable()`** on **`cipi-read-app-logs`** and **`cipi`** no longer fatals before **`sudo`** fallback.
+  - **Read-only `/etc/cipi`** — **`common.sh`** / **`vault.sh`** guards (shipped in **`lib/*.sh`**); migration verifies **`_cipi_config_writable`** is present.
+
+---
+
 ## [4.7.16] — 2026-07-14
 
 ### Fixed
 
-- **Panel API / `sudo cipi` failing with `chmod: Read-only file system (os error 30)`** — sourcing **`common.sh`** always ran **`chmod 700 /etc/cipi`** (and **`chmod`** on **`apps-public.json`**) without **`|| true`**. With **`set -e`**, any read-only **`/etc`** (kernel **`remount-ro`**, dual-boot NTFS left dirty, etc.) aborted even read-only commands like **`cipi db list`**, so the API returned only the chmod error. Init **`chmod`**/**`mkdir`** are now best-effort. **Migration 4.7.16** patches existing servers via **`cipi self-update`**.
+- **Panel API / `sudo cipi` failing on read-only `/etc/cipi`** — sourcing **`common.sh`** always ran **`chmod 700 /etc/cipi`**, recreated **`apps-public.json`** ( **`vault_read apps.json`** + write), and initialized missing vault files — all requiring writes under **`/etc/cipi`**. On a read-only root (kernel **`remount-ro`**, dual-boot NTFS left dirty, etc.) that aborted even read-only commands like **`cipi db list`**, with errors such as **`chmod: Read-only file system (os error 30)`**, **`apps-public.json: Read-only file system`**, or **`vault: failed to decrypt apps.json`**. Added **`_cipi_config_writable`**; init **`chmod`**/**`mkdir`**, **`ensure_apps_json_api_access`**, and **`vault_init`** are now best-effort when **`/etc/cipi`** cannot be written. Fix ships in **`lib/common.sh`** / **`lib/vault.sh`** on **`cipi self-update`** (verified by **migration 4.7.17**).
 
 ---
 

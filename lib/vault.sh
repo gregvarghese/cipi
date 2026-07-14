@@ -8,8 +8,9 @@
 
 vault_init() {
     [[ -f "$VAULT_KEY" ]] && return 0
-    openssl rand -base64 32 > "$VAULT_KEY"
-    chmod 400 "$VAULT_KEY"
+    [[ -w "${CIPI_CONFIG}" ]] || return 0
+    openssl rand -base64 32 > "$VAULT_KEY" 2>/dev/null || return 0
+    chmod 400 "$VAULT_KEY" 2>/dev/null || true
 }
 
 # Decrypt a config file and write JSON to stdout.

@@ -171,15 +171,26 @@ domain_is_used_by_other_app() {
 
 app_get() { vault_read apps.json | jq -r --arg a "$1" --arg k "$2" '.[$a][$k] // empty'; }
 
+# True when /etc/cipi accepts writes (false on remount-ro even if mode bits look writable).
+_cipi_config_writable() {
+    local probe="${CIPI_CONFIG}/.cipi-writable-$$"
+    touch "$probe" 2>/dev/null || return 1
+    rm -f "$probe" 2>/dev/null || true
+    return 0
+}
+
 # Generate apps-public.json: a plaintext projection of apps.json containing
 # only non-sensitive fields (domain, aliases, php, branch, repository, user,
 # created_at, suspended, basic_auth, custom, docroot). The encrypted apps.json
 # keeps webhook tokens and git IDs safe.
 _update_apps_public() {
     [[ -f "${CIPI_CONFIG}/apps.json" ]] || return 0
-    vault_read apps.json | jq '
+    _cipi_config_writable || return 0
+    local json
+    json=$(vault_read apps.json) || return 0
+    echo "$json" | jq '
         with_entries(.value |= {domain, aliases, php, branch, repository, user, created_at, suspended, basic_auth, custom, docroot})
-    ' > "${CIPI_CONFIG}/apps-public.json"
+    ' > "${CIPI_CONFIG}/apps-public.json" 2>/dev/null || return 0
     chmod 640 "${CIPI_CONFIG}/apps-public.json" 2>/dev/null || true
     chgrp cipi-api "${CIPI_CONFIG}/apps-public.json" 2>/dev/null || true
 }
@@ -189,6 +200,7 @@ _update_apps_public() {
 ensure_apps_json_api_access() {
     [[ -f "${CIPI_CONFIG}/api.json" ]] || return 0
     [[ -f "${CIPI_CONFIG}/apps.json" ]] || return 0
+    _cipi_config_writable || return 0
     if ! getent group cipi-api &>/dev/null; then
         groupadd cipi-api 2>/dev/null || true
     fi
@@ -353,12 +365,14 @@ EOF
 mkdir -p "${CIPI_CONFIG}" "${CIPI_LOG}" 2>/dev/null || true
 chmod 700 "${CIPI_CONFIG}" 2>/dev/null || true
 vault_init
-for f in apps.json databases.json; do
-    if [[ ! -f "${CIPI_CONFIG}/$f" ]]; then
-        echo "{}" | vault_write "$f"
-    fi
-done
-ensure_apps_json_api_access
+if _cipi_config_writable 2>/dev/null; then
+    for f in apps.json databases.json; do
+        if [[ ! -f "${CIPI_CONFIG}/$f" ]]; then
+            echo "{}" | vault_write "$f" 2>/dev/null || true
+        fi
+    done
+    ensure_apps_json_api_access
+fi
 
 # Email notifications (optional) — cipi_notify "Subject" "Body" [trigger_id]
 [[ -f "${CIPI_LIB}/notifications.sh" ]] && source "${CIPI_LIB}/notifications.sh"

@@ -30,5 +30,5 @@ www-data ALL=(root) NOPASSWD: /usr/local/bin/cipi app create *, \
                                /usr/local/bin/cipi-read-app-logs *, \
                                /bin/cat /etc/cipi/apps.json
 SUDOEOF
-    chmod 440 /etc/sudoers.d/cipi-api
+    chmod 440 /etc/sudoers.d/cipi-api 2>/dev/null || true
 }
